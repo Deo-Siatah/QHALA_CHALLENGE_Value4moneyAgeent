@@ -242,6 +242,7 @@ mcp_server/             our own MCP server, one file per tool, plus the audit wr
 sql/                    schema, indexes, and the demo data slice
 tests/                  the tests are the spec
 EVALS.md                what was checked, what it proved, and what is still broken
+ARCHITECTURE.md         the agent shape, built versus borrowed MCP, and why
 ```
 
 ---
@@ -254,9 +255,12 @@ Tests are the spec. Run one file at a time:
 uv run pytest tests/test_quality_check.py -q
 ```
 
-[`EVALS.md`](EVALS.md) records eight eval tasks with the command and the observed result for each,
+[`EVALS.md`](EVALS.md) records ten eval tasks with the command and the observed result for each,
 including the scale-guard correction and the one known failure we have not fixed. It is the honest
 record, including what does not work yet.
+
+[`ARCHITECTURE.md`](ARCHITECTURE.md) explains the agent shape, which MCP servers we built and which we
+borrowed, and why — including the one judgement call we would expect a reviewer to question.
 
 ---
 
