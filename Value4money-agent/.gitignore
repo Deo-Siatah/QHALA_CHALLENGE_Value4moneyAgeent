@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.class
+.venv/
+venv/
+*.venv
+
+# UV / Package Management
+.uv/
+
+# Data directory (keep folder structure, ignore raw data)
+data/raw/*
+!data/raw/.gitkeep
+
+# Generated reports
+outputs/
+
+# Environment and Secrets
+.env
+.env.*
+
+# IDEs & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

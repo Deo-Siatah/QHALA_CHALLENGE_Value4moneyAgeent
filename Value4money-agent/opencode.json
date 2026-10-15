@@ -1,0 +1,25 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "zai/glm-4.5-flash",
+  "default_agent": "value4money-analyst",
+  "instructions": ["agents.md"],
+  "permission": {
+    "edit": "ask",
+    "bash": { "uv run *": "allow", "pytest *": "allow", "*": "ask" },
+    "external_directory": { "data/**": "allow", "sample_bids/**": "allow", "*": "ask" }
+  },
+  "references": {
+    "loader": {
+      "path": "loader",
+      "description": "Data loading utilities and SQL operations"
+    },
+    "mcp_server": {
+      "path": "mcp_server",
+      "description": "MCP server implementation and tools"
+    },
+    "agent": {
+      "path": "agent",
+      "description": "LangGraph agent implementation"
+    }
+  }
+}
