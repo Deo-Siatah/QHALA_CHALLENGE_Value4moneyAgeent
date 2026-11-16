@@ -8,7 +8,7 @@ from config import settings
 def bid(bidder, stated_total, computed_total=None, issues=None, ok=True):
     return {"bidder": bidder, "tender_ref": "T/1", "currency": "KES", "items": [],
             "stated_total": stated_total, "computed_total": computed_total if computed_total
-            is not None else stated_total, "arithmetic_ok": ok, "issues": issues or []}
+            is not None else stated_total, "arithmetic_ok": ok, "issues": issues or [], "status": "ok"}
 
 
 def pool(n, start=1):

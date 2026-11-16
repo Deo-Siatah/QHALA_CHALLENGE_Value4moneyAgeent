@@ -5,11 +5,18 @@ decisions behind it.
 
 ## 1. Agent shape
 
-One workflow, not a swarm. A single LangGraph `StateGraph` with eight node-level agents:
+One workflow, not a swarm. A single LangGraph `StateGraph` with ten node-level agents:
 
 ```
-intake → research → quality_check → score → draft → verify_sources → approval → file
+tender_intake → bid_intake → confirm_intake → research → quality_check → score → draft
+              → verify_sources → approval → file
 ```
+
+Intake is three nodes because reading evidence and accepting it are different jobs. `tender_intake`
+keeps every tender field with its page and line; `bid_intake` records each bid's status, confidence
+and arithmetic; `confirm_intake` interrupts only when a scan or a missing tender field needs a named
+person. The web upload has no intake screen, so it records the issues and continues; the CLI keeps the
+gate. A bid whose status is not `ok` never reaches scoring or drafting.
 
 An explicit workflow over agents that message each other, because every step here carries an audit
 obligation: a committee can ask which tool produced a number, and the only reliable answer is a path
@@ -38,20 +45,21 @@ rather than a number to fill the gap.
 |              | Own (`mcp_server/`)               | Borrowed (Postgres MCP Pro)                 |
 | ------------ | --------------------------------- | ------------------------------------------- |
 | Transport    | stdio, `FastMCP("value4money")`   | stdio, via `uvx`                           |
-| Tools        | 6, purpose-built                  | whatever the model asks of it               |
+| Tools        | 8, purpose-built                  | whatever the model asks of it               |
 | Role         | the whole workflow                | research fallback only, after 2 thin searches |
 | DB access    | primary Postgres URL              | separate SELECT-only role                   |
 
-**Why we built our own six.** Domain operations, not generic queries: check a bid's arithmetic, find
-comparables, flag unusable records, place bids against a pool, draft the file, submit with a named
-approver. Each is a fixed contract the workflow depends on, and each takes a `run_id` so the audit
-wrapper can log it.
+**Why we built our own ten.** Domain operations, not generic queries: parse a bid as text, extract it
+with a layout pass, verify the extracted rows, read a tender's labelled fields, record an audited
+intake correction, find comparables, flag unusable records, place bids against a pool, draft the file,
+submit with a named approver. Each is a fixed contract the workflow depends on, and each takes a
+`run_id` so the audit wrapper can log it.
 
 **Why we borrowed one.** Our search takes fixed parameters and cannot express a question the schema
 did not anticipate. The borrowed server reports what tables actually exist and lets the model write one
 read-only query against them. It recovers what our tool cannot express; it does not replace it.
 
-**The honest caveat.** Our six tools are called **in-process** via `agent/tools.py`, not over MCP. The
+**The honest caveat.** Our eight tools are called **in-process** via `agent/tools.py`, not over MCP. The
 surface in `server.py` carries identical names and arguments, so a node could switch to stdio without
 changing a line. The reason is the audit guarantee: one audited entry point per tool means no node can
 bypass `audit_log`. We would rather state this than let a reviewer find it.

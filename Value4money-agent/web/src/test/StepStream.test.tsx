@@ -52,28 +52,29 @@ describe("the step stream while processing", () => {
   it("badges the running step with its number", () => {
     renderStream(stream({ research: { status: "running" } }), "research");
 
-    expect(screen.getByLabelText("step 2")).toBeInTheDocument();
-    expect(screen.getByText("Step 2 of 8")).toBeInTheDocument();
+    expect(screen.getByLabelText("step 4")).toBeInTheDocument();
+    expect(screen.getByText("Step 4 of 10")).toBeInTheDocument();
   });
 
   it("turns the badge into a tick once the step is done", () => {
     const { container } = renderStream(stream({ research: { status: "done", elapsedMs: 7800, summary: "30 candidates" } }), "research");
 
-    expect(screen.getByLabelText("step 2 complete")).toBeInTheDocument();
+    expect(screen.getByLabelText("step 4 complete")).toBeInTheDocument();
     expect(container.querySelector("svg")).not.toBeNull();
     expect(screen.getByText("30 candidates")).toBeInTheDocument();
   });
 
   it("falls forward to the next unfinished step when none is marked running", () => {
-    renderStream(stream({ intake: { status: "done", summary: "3 bids read" } }), null);
+    renderStream(stream({ tender_intake: { status: "done" }, bid_intake: { status: "done" },
+      confirm_intake: { status: "done" } }), null);
 
     expect(screen.getByText("body for research")).toBeInTheDocument();
-    expect(screen.getByLabelText("step 2")).toBeInTheDocument();
+    expect(screen.getByLabelText("step 4")).toBeInTheDocument();
   });
 });
 
 describe("the step stream as a summary", () => {
-  it("unfolds all eight steps, so the shape of the whole job is visible", () => {
+  it("unfolds all ten steps, so the shape of the whole job is visible", () => {
     renderStream(stream(), null, "summary");
 
     for (const step of STEPS) {
@@ -93,12 +94,12 @@ describe("the step stream as a summary", () => {
 
   it("marks a finished step with a tick, in words as well as in a glyph", () => {
     const { container } = renderStream(
-      stream({ intake: { status: "done", summary: "3 bids read" } }),
+      stream({ bid_intake: { status: "done", summary: "3 bids read" } }),
       null,
       "summary",
     );
 
-    expect(screen.getByLabelText("intake: done")).toBeInTheDocument();
+    expect(screen.getByLabelText("bid_intake: done")).toBeInTheDocument();
     expect(container.querySelector("svg")).not.toBeNull();
   });
 

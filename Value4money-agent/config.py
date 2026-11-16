@@ -5,6 +5,10 @@ from pydantic import Field
 
 class Settings(BaseSettings):
     bids_dir: Path = Field(default="sample_bids", env="BIDS_DIR")
+    tender_dir: Path = Field(default="sample_tenders", env="TENDER_DIR")
+    page_min_chars: int = Field(default=40, env="PAGE_MIN_CHARS")
+    page_garbled_ratio: float = Field(default=0.3, env="PAGE_GARBLED_RATIO")
+    intake_gate: bool = Field(default=True, env="INTAKE_GATE")
     database_url: str = Field(env="DATABASE_URL", repr=False)
     max_candidates: int = Field(default=30, env="MAX_CANDIDATES")
     fuzzy_threshold: float = Field(default=0.3, env="FUZZY_THRESHOLD")

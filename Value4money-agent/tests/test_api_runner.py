@@ -114,7 +114,9 @@ APPROVAL = {"tender_ref": "T/1", "summary": "Twelve awards were compared.",
             "benchmark": {"n": 12}, "evidence_status": "has_evidence"}
 
 PAUSED = [
-    {"intake": {"bids": [{"bidder": "Apex", "stated_total": 100.0}]}},
+    {"tender_intake": {"tender_fields": {}}},
+    {"bid_intake": {"bids": [{"bidder": "Apex", "stated_total": 100.0}]}},
+    {"confirm_intake": {"intake_confirmed": True}},
     {"research": {"candidates": [{"award_id": "a01"}], "search_attempts": 1}},
     {"__interrupt__": (Interrupt(APPROVAL),)},
 ]
@@ -180,7 +182,7 @@ def types_of(run):
     return [event.type for event in read_all(run.channel)]
 
 
-def test_a_run_reports_that_it_started_with_the_eight_steps():
+def test_a_run_reports_that_it_started_with_the_ten_steps():
     run = drive(runner())
 
     events = read_all(run.channel)
@@ -217,7 +219,7 @@ def test_each_step_reports_its_own_time():
     run = drive(runner())
 
     finished = {e.step: e.elapsed_ms for e in read_all(run.channel) if e.type == "step.finished"}
-    assert sorted(finished) == ["intake", "research"]
+    assert sorted(finished) == ["bid_intake", "confirm_intake", "research", "tender_intake"]
     assert all(value >= 0 for value in finished.values())
 
 
@@ -265,6 +267,16 @@ def test_a_run_that_breaks_reports_the_failure_and_closes_its_channel():
     failure = next(e for e in read_all(run.channel) if e.type == "run.error")
     assert "the database is away" in failure.message
     assert run.channel.closed
+
+
+def test_a_tender_path_reaches_the_initial_state():
+    r = runner()
+
+    run = r.start("run-tender", ["a.pdf"], "tender.pdf")
+    wait(lambda: run.status == models.RunStatus.awaiting_approval)
+
+    assert run.tender_path == "tender.pdf"
+    assert r.graph.seen[0]["tender_path"] == "tender.pdf"
 
 
 def test_two_runs_can_be_held_at_once_and_are_listed_newest_first():
@@ -361,7 +373,7 @@ def test_a_snapshot_shows_what_the_checkpoint_holds_and_the_steps_that_ran():
     assert snapshot.pool_values == [2839845.72]
     assert snapshot.status == models.RunStatus.awaiting_approval
     done = {t.step for t in snapshot.steps if t.status == models.StepStatus.done}
-    assert done == {"intake", "research"}
+    assert done == {"tender_intake", "bid_intake", "confirm_intake", "research"}
 
 
 def test_a_step_summary_is_the_line_the_terminal_prints():

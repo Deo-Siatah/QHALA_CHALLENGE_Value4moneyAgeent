@@ -28,7 +28,7 @@ from config import settings
 from mcp_server.tools.parse_bid_pdf import BidParseError
 from agent.state import AgentState
 from agent.llm import ask_json
-from agent.tools import parse_bid_pdf
+from agent.tools import parse_bid_pdf_strict as parse_bid_pdf
 from agent.tracing import record_tender
 
 MAX_PARSE_WORKERS = 4

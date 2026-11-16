@@ -15,7 +15,7 @@ from api import models
 
 
 def test_the_step_order_is_the_one_the_terminal_runs():
-    """One run has one order. The CLI already prints it; the web UI must show the same eight."""
+    """One run has one order. The CLI already prints it; the web UI must show the same ten."""
     assert list(models.STEPS) == STEP_NAMES
 
 
@@ -64,7 +64,7 @@ def test_a_snapshot_carries_the_figures_the_run_page_shows():
         "description": "construction of classroom blocks",
         "bids": [{"bidder": "Taveta", "stated_total": 2478800.0, "items": [],
                   "computed_total": 2478800.0, "arithmetic_ok": True,
-                  "issues": ["Stated total does not match"], "currency": "KES"}],
+                  "issues": ["Stated total does not match"], "currency": "KES", "status": "ok"}],
         "bid_comments": {"Taveta": "4.2% above the median."},
         "benchmark": {"n": 17, "confidence": "high", "median_kes": 2839845.72,
                       "q1_kes": 1898942.0, "q3_kes": 4021089.0,
@@ -117,7 +117,7 @@ def test_a_bid_with_no_benchmark_row_still_renders_with_nothing_claimed():
     rather than a fabricated zero."""
     snapshot = models.snapshot_from_state(
         {"run_id": "run-1",
-         "bids": [{"bidder": "Taveta", "stated_total": 2478800.0}],
+         "bids": [{"bidder": "Taveta", "stated_total": 2478800.0, "status": "ok"}],
          "benchmark": {"n": 2, "confidence": "insufficient", "median_kes": None,
                        "q1_kes": None, "q3_kes": None,
                        "bids": [{"bidder": "Taveta", "total": 2478800.0,
@@ -133,7 +133,7 @@ def test_the_steps_start_pending_and_the_running_one_is_marked():
 
     timings = {timing.step: timing.status for timing in snapshot.steps}
 
-    assert timings["intake"] == "pending"
+    assert timings["tender_intake"] == "pending"
     assert timings["draft"] == "running"
     assert timings["file"] == "pending"
     assert [timing.step for timing in snapshot.steps] == list(models.STEPS)
@@ -175,3 +175,16 @@ def test_events_round_trip_through_the_union_so_the_ui_can_parse_them():
 def test_a_union_member_rejects_another_type_discriminator():
     with pytest.raises(ValidationError):
         models.StepFinished.model_validate({"type": "model.token", "step": "draft", "delta": "x"})
+
+
+def test_a_snapshot_writes_each_finding_source_as_a_label_the_page_can_show():
+    state = {"run_id": "run-1",
+             "findings": [{"text": "A finding.",
+                           "sources": [{"kind": "pool", "award_id": "a01"},
+                                       {"kind": "bid", "bidder": "Apex",
+                                        "file": "apex.pdf", "page": 4}]}]}
+
+    snapshot = models.snapshot_from_state(state, status="awaiting_approval")
+
+    assert snapshot.findings == [{"text": "A finding.",
+                                  "sources": ["a01", "Apex, apex.pdf p.4"]}]

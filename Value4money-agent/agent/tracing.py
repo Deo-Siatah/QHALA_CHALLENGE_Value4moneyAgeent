@@ -11,8 +11,8 @@
 #
 # Where the spans come from:
 #   the run    agent/run.py        one trace for a start or a resume
-#   a node     agent/graph.py      what each of the eight steps was doing
-#   a tool     agent/tools.py every call made to one of the six tools
+#   a node     agent/graph.py      what each of the ten steps was doing
+#   a tool     agent/tools.py every call made to one of the eight tools
 #   a model    agent/llm.py        every prompt sent to Hasibu
 
 import functools

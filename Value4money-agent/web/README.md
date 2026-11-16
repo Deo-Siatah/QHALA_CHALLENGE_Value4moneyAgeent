@@ -7,16 +7,16 @@ the API starts the agent, forwards the events it produces, and serves the eviden
 
 Three screens, all reading the one run the API is holding:
 
-- **Start** (`/`) — drop or choose the bid PDFs for one tender. Choosing them is not starting them:
-  the files are staged by name, any of them can be taken back out, and nothing happens until
-  **Start Analysis** is pressed. A run writes audit rows and spends a model call the moment it
+- **Start** (`/`) — drop or choose the tender document and the bid PDFs for that tender. Choosing
+  them is not starting them: the files are staged by name, any of them can be taken back out, and
+  nothing happens until **Start Analysis** is pressed. A run writes audit rows and spends a model call the moment it
   begins, so a mis-drop must cost nothing before a person has looked at it.
 - **Runs** (`/runs`) — every run the API is holding, newest first.
 - **Run** (`/runs/:id`) — the live view of one run, in two movements.
 
 **While Hasibu works, one step fills the page.** The run page is not a stack of cards. The step
 that is happening now is held in a single focal container: a numbered badge at the top names it
-(`Step 3 of 8`), the model's words and the step's detail stream live below it, and when the step
+(`Step 3 of 10`), the model's words and the step's detail stream live below it, and when the step
 finishes the badge turns into a green tick before the same slot is handed to the next step.
 
 **Once the run reaches the human node, the whole job unfolds.** When the pipeline pauses at the
@@ -27,6 +27,14 @@ report live at the bottom of that overview.
 
 State never depends on colour alone: every step is carried by a word and a glyph as well as a tone,
 so the page reads correctly in greyscale and in print.
+
+The landing page explains the workflow before upload: Hasibu reads the tender and bids, compares them
+with public awards, and prepares evidence for a named human approval. The page keeps the upload flow
+as the primary action and makes clear that Hasibu prepares evidence while the committee decides.
+
+The report actions use the generated PDF. **Print report** opens the PDF in a new tab, while **Download
+PDF** downloads the same report. Both use the selected page settings: A4 or Letter, in portrait or
+landscape orientation.
 
 ## Running it
 
@@ -61,8 +69,8 @@ ever reach the event stream, and a token in a query string would end up in logs.
 the header on the way past instead, so the browser never holds the token and no code here reads one.
 
 The consequence is deliberate: the interface only ever works through a proxy. In development that is
-Vite (`web/vite.config.ts`); in production it is the function in `web/api/[...path].ts`, described
-under Deployment below. Neither stores the token anywhere the browser can read it.
+Vite (`web/vite.config.ts`); in production it is the function in `web/api/proxy.ts`, described under
+Deployment below. Neither stores the token anywhere the browser can read it.
 
 ## Deployment
 
@@ -101,7 +109,7 @@ inlines them into the client bundle:
 | `BACKEND_URL` | `https://your-backend.onrender.com` |
 | `API_TOKEN` | the same secret as the Render backend |
 
-The browser calls the relative `/api/*` paths it uses in development. `web/api/[...path].ts` forwards
+The browser calls the relative `/api/*` paths it uses in development. `web/api/proxy.ts` forwards
 them to `BACKEND_URL`, attaches `X-API-Token`, and streams the response back so the run's event
 stream keeps working. The token therefore never reaches the browser on the live site, exactly as it
 never does in development.
@@ -114,7 +122,7 @@ idle, so give it a paid always-on instance if a run might outlast that.
 ## Layout
 
 ```
-api/[...path].ts   the production proxy: /api/* to the backend, with the token attached
+api/proxy.ts       the production proxy: /api/* to the backend, with the token attached
 vercel.json        Vite build, SPA fallback, function duration
 src/
   api/types.ts     the shapes the API sends, mirroring api/models.py

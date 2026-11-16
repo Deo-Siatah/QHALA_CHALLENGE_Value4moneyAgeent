@@ -20,16 +20,21 @@ def filed(audit_conn, reports_conn, tmp_path, monkeypatch):
     calls = []
     real = file_node_module.submit_for_committee
 
-    def spy(run_id, report_md, approved_by):
-        calls.append((run_id, report_md, approved_by))
-        return real(run_id, report_md, approved_by)
+    def spy(run_id, report_md, approved_by, review_json=None):
+        calls.append((run_id, report_md, approved_by, review_json))
+        return real(run_id, report_md, approved_by, review_json)
 
     monkeypatch.setattr(file_node_module, "submit_for_committee", spy)
     return calls, tmp_path
 
 
 def approved(**overrides):
-    state = {"run_id": "run-1", "approval_status": "approved", "approved_by": "Grace Wanjiku",
+    state = {"run_id": "run-1", "tender_ref": "TENDER/NC/2026/014",
+             "description": "classroom construction", "started_at": "2026-10-19T11:09:22+00:00",
+             "benchmark": {"n": 0, "confidence": "insufficient", "median_kes": None,
+                           "q1_kes": None, "q3_kes": None, "bids": []},
+             "bids": [], "pool": [], "sources": [], "findings": [],
+             "approval_status": "approved", "approved_by": "Grace Wanjiku",
              "approval_note": "checked", "review_markdown": REPORT}
     state.update(overrides)
     return state
@@ -40,11 +45,24 @@ def test_an_approved_report_is_filed_and_the_file_written(filed):
 
     result = file_node(approved())
 
-    assert calls == [("run-1", REPORT, "Grace Wanjiku")]
+    run_id, report_md, approved_by, review_json = calls[0]
+    assert (run_id, report_md, approved_by) == ("run-1", REPORT, "Grace Wanjiku")
+    assert review_json["run_id"] == "run-1"
     assert result["submission"]["run_id"] == "run-1"
     assert result["submission"]["approved_by"] == "Grace Wanjiku"
     assert (tmp_path / "reports" / "run-1.md").read_text(encoding="utf-8") == REPORT
     assert "errors" not in result
+
+
+def test_filing_reuses_the_carried_report_model(filed, report_model):
+    calls, _ = filed
+
+    file_node(approved(report_model=report_model.model_dump(mode="json")))
+
+    review_json = calls[0][3]
+    assert review_json["bids"][0]["bidder"] == "Zed"
+    assert review_json["benchmark"]["median"] == 2_839_845.72
+    assert review_json["annex_pool"][0]["award_id"] == "a01"
 
 
 def test_the_filing_is_logged_with_the_approver(filed, audit_conn):

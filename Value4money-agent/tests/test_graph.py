@@ -3,12 +3,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END
 
 from agent import graph
-from agent.graph import (build_graph, route_after_intake, route_after_quality_check,
+from agent.graph import (build_graph, route_after_confirm, route_after_quality_check,
                          route_after_verify_sources, route_after_approval)
 from agent.state import initial_state
 from config import settings
 
-NODES = ["intake", "research", "quality_check", "score", "draft", "verify_sources", "approval", "file"]
+NODES = ["tender_intake", "bid_intake", "confirm_intake", "research", "quality_check",
+         "score", "draft", "verify_sources", "approval", "file"]
 
 
 def compiled_edges():
@@ -21,20 +22,24 @@ def test_every_node_is_registered():
     assert set(build_graph().get_graph().nodes) - {"__start__", "__end__"} == set(NODES)
 
 
-def test_start_goes_to_intake_and_file_ends_the_run():
+def test_start_goes_to_tender_intake_and_file_ends_the_run():
     edges = compiled_edges()
 
-    assert ("__start__", "intake") in edges
+    assert ("__start__", "tender_intake") in edges
     assert ("file", "__end__") in edges
 
 
-def test_intake_routes_to_research_when_bids_were_parsed():
-    assert route_after_intake({"bids": [{"bidder": "Apex"}]}) == "research"
+def test_a_confirmed_intake_with_a_usable_bid_goes_to_research():
+    assert route_after_confirm({"intake_confirmed": True,
+                                "bids": [{"bidder": "Apex", "status": "ok"}]}) == "research"
 
 
-def test_intake_ends_the_run_when_no_bid_parsed():
-    assert route_after_intake({"bids": []}) == END
-    assert route_after_intake({"parse_issues": ["file unreadable"]}) == END
+def test_an_unconfirmed_intake_ends_the_run():
+    assert route_after_confirm({"intake_confirmed": False,
+                                "bids": [{"bidder": "Apex", "status": "ok"}]}) == END
+    assert route_after_confirm({"intake_confirmed": True, "bids": []}) == END
+    assert route_after_confirm({"intake_confirmed": True,
+                                "bids": [{"bidder": "Apex", "status": "unreadable"}]}) == END
 
 
 @pytest.mark.parametrize("attempts, expected", [(1, "research"), (2, "research"), (3, "score")])
@@ -89,9 +94,15 @@ def test_approval_ends_the_run_when_nobody_approved(status):
 def test_a_run_loops_to_the_caps_and_finishes(monkeypatch):
     seen = {"research": 0, "draft": 0}
 
-    def fake_intake(state):
-        return {"bids": [{"bidder": "Apex", "total": 3_000_000.0}], "search_attempts": 0,
-                "quality_attempts": 0, "verify_rounds": 0}
+    def fake_tender(state):
+        return {"tender_fields": {}}
+
+    def fake_bid_intake(state):
+        return {"bids": [{"bidder": "Apex", "total": 3_000_000.0, "status": "ok"}],
+                "search_attempts": 0, "quality_attempts": 0, "verify_rounds": 0}
+
+    def fake_confirm(state):
+        return {"intake_confirmed": True}
 
     def fake_research(state):
         seen["research"] += 1
@@ -116,7 +127,9 @@ def test_a_run_loops_to_the_caps_and_finishes(monkeypatch):
     def fake_file(state):
         return {"submission": {"report_id": 1}}
 
-    monkeypatch.setattr(graph, "intake_node", fake_intake)
+    monkeypatch.setattr(graph, "tender_intake_node", fake_tender)
+    monkeypatch.setattr(graph, "bid_intake_node", fake_bid_intake)
+    monkeypatch.setattr(graph, "confirm_intake_node", fake_confirm)
     monkeypatch.setattr(graph, "research_node", fake_research)
     monkeypatch.setattr(graph, "quality_check_node", fake_quality)
     monkeypatch.setattr(graph, "score_node", fake_score)

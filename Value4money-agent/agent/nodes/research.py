@@ -60,12 +60,14 @@ def _first_search(state: AgentState) -> Dict[str, Any]:
 
 def _wider_search(state: AgentState) -> Dict[str, Any]:
     """Step the search one notch wider in code, for when the model cannot be reached."""
-    previous_match = state.get("match", FIRST_MATCH)
+    last = state.get("last_search") or {}
+    previous_match = state.get("match") or last.get("match") or FIRST_MATCH
     match = WIDER_MATCH.get(previous_match, "fuzzy")
-    min_year = state.get("min_year")
+    min_year = state.get("min_year") if "min_year" in state else last.get("min_year")
     if previous_match == "fuzzy":
         min_year = None
-    return {"query": state.get("query", ""), "match": match, "min_year": min_year}
+    return {"query": state.get("query") or last.get("query", ""), "match": match,
+            "min_year": min_year}
 
 
 MATCH_ORDER = {"strict": 0, "loose": 1, "fuzzy": 2}
@@ -87,6 +89,15 @@ def _not_wider(previous: Dict[str, Any], proposed: Dict[str, Any]) -> bool:
     return False
 
 
+def _too_many_steps(previous: Dict[str, Any], proposed: Dict[str, Any]) -> bool:
+    """Whether a move changes more than one setting, so it skips a rung of the ladder."""
+    was = MATCH_ORDER.get(previous.get("match"), 0)
+    now = MATCH_ORDER.get(proposed.get("match"), 0)
+    if now - was > 1:
+        return True
+    return now != was and proposed.get("min_year") != previous.get("min_year")
+
+
 def _previous(state: AgentState) -> Optional[Dict[str, Any]]:
     """Describe the search that was just run, for the model to widen, or null on the first attempt."""
     last = state.get("last_search")
@@ -101,8 +112,10 @@ def _previous(state: AgentState) -> Optional[Dict[str, Any]]:
     else:
         problem = (f"{returned} awards returned, fewer than the {settings.good_pool_n} wanted "
                    f"for a good pool")
-    return {"query": state.get("query"), "match": state.get("match"),
-            "min_year": state.get("min_year"), "returned": returned,
+    return {"query": state.get("query") or last.get("query"),
+            "match": state.get("match") or last.get("match"),
+            "min_year": state.get("min_year") if "min_year" in state else last.get("min_year"),
+            "returned": returned,
             "target": settings.good_pool_n, "problem": problem}
 
 
@@ -112,8 +125,9 @@ def _next_move(state: AgentState, attempt: int) -> Tuple[Dict[str, Any], List[st
     if previous is None:
         return _first_search(state), []
 
-    payload = {"description": state.get("description"), "attempt": attempt,
-               "previous": previous}
+    payload = {"description": state.get("description"),
+               "core_terms": state.get("core_terms") or [],
+               "attempt": attempt, "previous": previous}
     try:
         answer = ask_json("research_next_move", payload)
     except LlmError as exc:
@@ -128,9 +142,9 @@ def _next_move(state: AgentState, attempt: int) -> Tuple[Dict[str, Any], List[st
         raise ValueError(f"research_next_move gave min_year {min_year!r}, expected a whole year or null")
 
     proposed = {"query": query.strip(), "match": match, "min_year": min_year}
-    if _not_wider(previous, proposed):
-        return _wider_search(state), ["the model proposed a search no wider than the one already "
-                                      f"tried ({previous.get('match')}); widened in code instead"]
+    if _not_wider(previous, proposed) or _too_many_steps(previous, proposed):
+        return _wider_search(state), ["the model proposed a search that was no wider or skipped a "
+                                      f"step from {previous.get('match')}; widened in code instead"]
     return proposed, []
 
 
@@ -183,7 +197,8 @@ def research_node(state: AgentState) -> dict:
 
     move, errors = _next_move(state, attempt)
     search = find_comparable_awards(run_id, move["query"], state.get("category"), None,
-                                    move["match"], move["min_year"], None)
+                                    move["match"], move["min_year"], None,
+                                    required_terms=state.get("core_terms"))
     candidates = _accumulated(state.get("candidates", []), search.get("candidates", []))
     fallback_used = None
 

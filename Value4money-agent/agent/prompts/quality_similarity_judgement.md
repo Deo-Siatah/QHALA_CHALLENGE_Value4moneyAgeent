@@ -17,13 +17,18 @@ that were actually comparable.
 ```json
 {"judgements": {
   "a01": {"verdict": "same_work", "reason": "classroom block construction, same scope of work"},
-  "a02": {"verdict": "different_work", "reason": "office building, not classroom construction"}
+  "a02": {"verdict": "different_work", "reason": "office building, not classroom construction",
+          "reason_code": "different_work"}
 }}
 ```
 
 - `verdict` must be exactly one of: "same_work", "different_work".
 - Every `award_id` in the input must appear exactly once in the output. No other award_id may appear.
 - `reason` is one short sentence naming the work, not the money.
+- A `different_work` verdict carries `reason_code`: either "different_work" for another kind of
+  work, or "multi_scope" when the title bundles unrelated scopes (for example classrooms and pit
+  latrines) that cannot be compared as one kind of work. Do not use "multi_scope" merely because
+  the award covers several sites of the same work.
 
 ## Example
 
@@ -32,9 +37,10 @@ Tendered work is "construction of classroom blocks".
 ```json
 {"judgements": {
   "a01": {"verdict": "same_work", "reason": "classroom block construction"},
-  "a02": {"verdict": "different_work", "reason": "office headquarters, not classroom work"},
+  "a02": {"verdict": "different_work", "reason": "office headquarters, not classroom work", "reason_code": "different_work"},
   "a03": {"verdict": "same_work", "reason": "classroom works at a secondary school"},
-  "a04": {"verdict": "different_work", "reason": "supply of teaching and learning materials"}
+  "a04": {"verdict": "different_work", "reason": "supply of teaching and learning materials", "reason_code": "different_work"},
+  "a05": {"verdict": "different_work", "reason": "classrooms and pit latrines, separate scopes", "reason_code": "multi_scope"}
 }}
 ```
 

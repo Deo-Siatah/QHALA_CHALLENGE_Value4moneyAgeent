@@ -133,7 +133,7 @@ def test_a_step_line_carries_the_fact_that_matters():
     text = printed(step, 2, "research", 2.1,
                    {"candidates": [{"award_id": "a1"}] * 16})
 
-    assert "2/8" in text
+    assert "2/10" in text
     assert "research" in text
     assert "2.1s" in text
     assert "16 candidates" in text
@@ -229,7 +229,8 @@ def test_run_live_prints_a_line_per_node_and_returns_the_request(capsys, monkeyp
 
     class FakeGraph:
         def stream(self, state, config, stream_mode):
-            yield {"intake": {"bids": [{"bidder": "Apex"}], "parse_issues": []}}
+            yield {"tender_intake": {"tender_fields": {}}}
+            yield {"bid_intake": {"bids": [{"bidder": "Apex"}], "parse_issues": []}}
             yield {"score": {"benchmark": {"confidence": "high", "median_kes": 4800000.0}}}
             yield {"__interrupt__": (type("I", (), {"value": {"run_id": "run-1"}})(),)}
 

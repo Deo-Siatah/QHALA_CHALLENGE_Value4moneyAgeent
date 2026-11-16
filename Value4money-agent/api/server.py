@@ -1,4 +1,4 @@
-# The HTTP API the React UI talks to.
+﻿# The HTTP API the React UI talks to.
 #
 # This layer decides nothing and computes nothing. It accepts bid PDFs, starts a run, forwards the
 # events the run produces, hands a person's decision back to the run that is waiting for it, and
@@ -11,10 +11,11 @@
 #   without X-API-Token, and the server refuses to start at all when API_TOKEN is unset, because an
 #   evidence file is not something to leave open on a network.
 #
-#   The uploads folder. settings.bids_dir is pointed at settings.uploads_dir once, at startup, and
-#   each run's PDFs go under uploads/<run_id>/. parse_bid_pdf refuses any path outside bids_dir, so
-#   this is what lets an uploaded file be read by the ordinary audited tool with no special case and
-#   no per-request change to a process-wide setting, which is what makes concurrent runs safe.
+#   The uploads folder. settings.bids_dir and settings.tender_dir are pointed at settings.uploads_dir once, at
+#   startup, and each run's PDFs go under uploads/<run_id>/. parse_bid_pdf and extract_tender_pdf
+#   refuse any path outside those folders, so this is what lets an uploaded file be read by the
+#   ordinary audited tools with no special case and no per-request change to a process-wide
+#   setting, which is what makes concurrent runs safe.
 #
 #   The run id. It is the server's to choose. It becomes a checkpoint thread_id and a directory
 #   name, so a caller-supplied id is refused rather than trusted.
@@ -27,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
@@ -37,7 +38,10 @@ from agent.nodes.approval import HAS_EVIDENCE, PUBLISH_ANYWAY, needs_publish_any
 from agent.tracing import init_tracing
 from api import models
 from api.events import RunEventChannel
-from api.reports import render_pdf, render_tex, review_from_state
+from api.reports import render_pdf, render_report_pdf, render_tex, review_from_state
+from mcp_server.tools.report_fingerprint import fingerprint_markdown
+from mcp_server.tools.report_html import render_html
+from mcp_server.tools.report_model import ReportModel, build_report_model
 from api.runner import Runner, Run, RunError
 
 TOKEN_HEADER = "X-API-Token"
@@ -147,6 +151,11 @@ def create_app(runner: Optional[Runner] = None) -> FastAPI:
             # One setting, set once. Every run's files sit under it, so absolute paths validate in
             # parse_bid_pdf without anything being mutated per request.
             settings.bids_dir = settings.uploads_dir
+            settings.tender_dir = settings.uploads_dir
+            # The browser has no screen for the intake confirmation, so an
+            # intake that needs a person is recorded and carried forward instead of pausing a run
+            # that nobody can resume. The CLI keeps the gate.
+            settings.intake_gate = False
         else:
             app.state.runner = runner
         try:
@@ -174,8 +183,9 @@ def create_app(runner: Optional[Runner] = None) -> FastAPI:
     @app.post("/api/runs", status_code=202, dependencies=[Depends(require_token)])
     async def create_run(request: Request,
                          files: List[UploadFile] = File(default=[]),
+                         tender: Optional[UploadFile] = File(default=None),
                          run_id: Optional[str] = Form(default=None)) -> Dict[str, Any]:
-        """Take the bid PDFs and start a run. Returns at once; the events carry the rest."""
+        """Take the bid PDFs, and an optional tender, and start a run."""
         if not files:
             raise HTTPException(status_code=400, detail="at least one bid PDF is required")
         chosen = run_id or new_run_id()
@@ -184,12 +194,14 @@ def create_app(runner: Optional[Runner] = None) -> FastAPI:
                                 detail=f"run_id {chosen!r} must be letters, digits, - or _")
         folder = settings.uploads_dir / chosen
         paths = [await _save_upload(file, folder) for file in files]
+        tender_path = await _save_upload(tender, folder / "tender") if tender else None
         try:
-            run = runs(request).start(chosen, paths)
+            run = runs(request).start(chosen, paths, tender_path)
         except RunError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"run_id": run.run_id, "status": run.status.value,
-                "steps": list(models.STEPS), "uploaded": len(paths)}
+                "steps": list(models.STEPS), "uploaded": len(paths),
+                "tender_uploaded": tender_path is not None}
 
     @app.get("/api/runs", dependencies=[Depends(require_token)])
     async def list_runs(request: Request) -> List[Dict[str, Any]]:
@@ -264,6 +276,27 @@ def create_app(runner: Optional[Runner] = None) -> FastAPI:
                                        "never approved")
         return PlainTextResponse(markdown, media_type="text/markdown; charset=utf-8")
 
+    @app.get("/api/runs/{run_id}/report.html", dependencies=[Depends(require_token)])
+    async def get_report_html(request: Request, run_id: str,
+                              orientation: str = Query("portrait"),
+                              paper_size: str = Query("A4")) -> Any:
+        """The same evidence file as one self-contained print page, with the filed fingerprint."""
+        from fastapi.responses import HTMLResponse
+
+        run = _run_or_404(runs(request), run_id)
+        if not (run.state.get("review_markdown") or "").strip():
+            raise HTTPException(status_code=409,
+                                detail="this run has no report yet: it is still working, or it "
+                                       "was never approved")
+        model = _report_model_for(run)
+        fingerprint = run.state.get("fingerprint") or fingerprint_markdown(
+            run.state["review_markdown"])
+        html = render_html(model, fingerprint=fingerprint,
+                           approved_by=run.state.get("approved_by"),
+                           created_at=run.state.get("submitted_at"),
+                           orientation=orientation, paper_size=paper_size)
+        return HTMLResponse(html)
+
     @app.get("/api/runs/{run_id}/report.tex", dependencies=[Depends(require_token)])
     async def get_report_tex(request: Request, run_id: str) -> Any:
         """The same evidence file as LaTeX source, for a committee that keeps the file itself.
@@ -278,7 +311,9 @@ def create_app(runner: Optional[Runner] = None) -> FastAPI:
                         headers={"Content-Disposition": f'attachment; filename="{run_id}.tex"'})
 
     @app.get("/api/runs/{run_id}/report.pdf", dependencies=[Depends(require_token)])
-    async def get_report_pdf(request: Request, run_id: str) -> Any:
+    async def get_report_pdf(request: Request, run_id: str,
+                             orientation: str = Query("landscape"),
+                             paper_size: str = Query("A4")) -> Any:
         """The same evidence file as a PDF, rendered in pure Python with the figures the agent used.
 
         Not the browser's print of the markdown: this one is laid out by the server, so it prints the
@@ -286,11 +321,35 @@ def create_app(runner: Optional[Runner] = None) -> FastAPI:
         """
         from fastapi.responses import Response
 
-        data = render_pdf(_review_for(runs(request), run_id))
+        run = _run_or_404(runs(request), run_id)
+        if not (run.state.get("review_markdown") or "").strip():
+            raise HTTPException(status_code=409,
+                                detail="this run has no report yet: it is still working, or it "
+                                       "was never approved")
+        try:
+            data = render_report_pdf(_report_model_for(run), orientation=orientation,
+                                     paper_size=paper_size)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return Response(data, media_type="application/pdf",
                         headers={"Content-Disposition": f'attachment; filename="{run_id}.pdf"'})
 
     return app
+
+
+def _report_model_for(run: Run) -> ReportModel:
+    """The structured model for a run, rebuilt from its state when it was not carried in."""
+    carried = run.state.get("report_model")
+    if isinstance(carried, dict):
+        return ReportModel(**carried)
+    state = dict(run.state)
+    if not state.get("pool") and state.get("sources"):
+        state["pool"] = list(state["sources"])
+    review = {"run_id": run.run_id, "tender_ref": state.get("tender_ref"),
+              "benchmark": state.get("benchmark") or {},
+              "summary_note": state.get("summary_note"),
+              "report_degraded": state.get("report_degraded", False)}
+    return build_report_model(review, state)
 
 
 def _review_for(runner: Runner, run_id: str) -> Dict[str, Any]:
@@ -332,3 +391,4 @@ def _snapshot(runner: Runner, run_id: str) -> models.RunSnapshot:
 
 
 app = create_app()
+

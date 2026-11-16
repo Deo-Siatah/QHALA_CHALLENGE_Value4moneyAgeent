@@ -207,7 +207,7 @@ class RunEventHandler(BaseCallbackHandler):
         return ""
 
     def on_chain_start(self, serialized: Any, inputs: Any, **kwargs: Any) -> None:
-        """A chain began. Only the eight named steps of a run are steps; the rest are LangGraph's."""
+        """A chain began. Only the ten named steps of a run are steps; the rest are LangGraph's."""
         name = self._name(kwargs, serialized)
         if name not in models.STEPS:
             return

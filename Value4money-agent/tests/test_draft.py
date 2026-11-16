@@ -1,16 +1,16 @@
 import pytest
 
+from agent.llm import LlmError
 from agent.nodes import draft
 from agent.nodes.draft import draft_node
 
-SUMMARY = "Eighteen awards of classroom construction were compared, and one bid total sits 87.5% above the median of that pool."
-FINDING = "One bid total is 87.5% above the median of eighteen similar awards, above the upper quartile of 5600000.0."
-ANSWER = {
-    "summary": SUMMARY,
-    "bid_comments": {"Apex": "4.2% above the median, inside the normal range.",
-                     "Bora": "87.5% above the median of eighteen similar awards."},
-    "findings": [{"text": FINDING, "sources": ["a01", "a02"]}],
-    "sources_used": ["a01", "a02"],
+NOTES = {
+    "summary_note": "The pool is small, so the figures are context rather than proof.",
+    "finding_notes": {
+        "pool": "The awards cover similar classroom work.",
+        "bid:2": "The scope should be checked before relying on this comparison.",
+        "arithmetic:3": "The bid document should be checked against its line items.",
+    },
 }
 
 
@@ -20,26 +20,38 @@ def award(award_id, value=4_000_000.0, title="Classroom block construction", yea
             "currency": "KES", "quality_flags": []}
 
 
-def benchmark(n=18):
-    bids = [{"bidder": "Apex", "total": 5_000_000.0, "pct_vs_median": 4.2, "position": "within_range",
-             "arithmetic_issues": []},
-            {"bidder": "Bora", "total": 9_000_000.0, "pct_vs_median": 87.5, "position": "far_above",
-             "arithmetic_issues": ["Stated total 9000000.00 does not match computed total 8400000.00"]}]
-    return {"n": n, "confidence": "high", "median_kes": 4_800_000.0, "q1_kes": 4_100_000.0,
-            "q3_kes": 5_600_000.0, "sources": [f"a{i:02d}" for i in range(1, n + 1)], "bids": bids}
+def benchmark(n=11):
+    return {"n": n, "confidence": "medium", "median_kes": 2_839_845.72,
+            "q1_kes": 1_956_829.0, "q3_kes": 3_494_974.74,
+            "sources": ["a01", "a02", "a03"],
+            "bids": [{"bidder": "Apex", "total": 3_150_000.0, "pct_vs_median": 10.9,
+                      "position": "within_range"},
+                     {"bidder": "Bora", "total": 8_650_000.0, "pct_vs_median": 204.6,
+                      "position": "far_above"},
+                     {"bidder": "Zed", "total": 2_750_000.0, "pct_vs_median": -3.2,
+                      "position": "within_range"}]}
 
 
 def state(**overrides):
     base = {
-        "run_id": "run-1", "tender_ref": "TENDER/NC/2026/014", "description": "construction of classroom blocks",
-        "bids": [{"bidder": "Apex", "tender_ref": "TENDER/NC/2026/014", "currency": "KES", "items": [],
-                  "stated_total": 5_000_000.0, "computed_total": 5_000_000.0, "arithmetic_ok": True,
-                  "issues": []},
-                 {"bidder": "Bora", "tender_ref": "TENDER/NC/2026/014", "currency": "KES", "items": [],
-                  "stated_total": 9_000_000.0, "computed_total": 8_400_000.0, "arithmetic_ok": False,
-                  "issues": ["Stated total 9000000.00 does not match computed total 8400000.00"]}],
+        "run_id": "run-1", "tender_ref": "TENDER/NC/2026/014",
+        "description": "construction of classroom blocks",
+        "bids": [{"bidder": "Apex", "file": "apex.pdf", "total_page": 2,
+                  "tender_ref": "TENDER/NC/2026/014", "currency": "KES", "items": [],
+                  "stated_total": 3_150_000.0, "computed_total": 3_150_000.0,
+                  "arithmetic_ok": True, "status": "ok", "issues": []},
+                 {"bidder": "Bora", "file": "bora.pdf", "total_page": 3,
+                  "tender_ref": "TENDER/NC/2026/014", "currency": "KES", "items": [],
+                  "stated_total": 8_650_000.0, "computed_total": 8_650_000.0,
+                  "arithmetic_ok": True, "status": "ok", "issues": []},
+                 {"bidder": "Zed", "file": "zed.pdf", "total_page": 1,
+                  "tender_ref": "TENDER/NC/2026/014", "currency": "KES", "items": [],
+                  "stated_total": 2_750_000.0, "computed_total": 2_690_000.0,
+                  "arithmetic_ok": False, "status": "ok",
+                  "issues": ["Stated total 2750000.00 does not match computed total 2690000.00"]}],
         "benchmark": benchmark(),
-        "pool": [award("a01"), award("a02", 5_000_000.0, "Classroom works", 2023), award("a03")],
+        "pool": [award("a01", 2_501_490.0), award("a02", 3_289_999.48, "Classroom works", 2023),
+                 award("a03", 2_839_845.72)],
         "excluded": {"different_work": 4, "no_value": 2},
         "search": {"match": "loose", "category": "works", "min_year": 2020, "attempts": 2},
         "verify_rounds": 0,
@@ -50,7 +62,6 @@ def state(**overrides):
 
 @pytest.fixture(autouse=True)
 def logged(audit_conn, monkeypatch):
-    """Keep the audit wrapper off the real audit_log for every test in this module."""
     from mcp_server import audit
     from conftest import SharedConnection
 
@@ -59,12 +70,13 @@ def logged(audit_conn, monkeypatch):
 
 @pytest.fixture
 def wording(monkeypatch):
-    """Answer draft_review_wording with a canned review, capturing the payload."""
     calls = []
 
-    def install(answer=ANSWER):
+    def install(answer=NOTES, raises=None):
         def fake_ask(prompt_name, payload):
             calls.append((prompt_name, payload))
+            if raises is not None:
+                raise raises
             return answer
 
         monkeypatch.setattr(draft, "ask_json", fake_ask)
@@ -73,7 +85,7 @@ def wording(monkeypatch):
     return install
 
 
-def test_the_payload_carries_the_benchmark_and_every_bid(wording):
+def test_the_model_sees_the_findings_but_not_the_figures(wording):
     calls = wording()
 
     draft_node(state())
@@ -81,78 +93,181 @@ def test_the_payload_carries_the_benchmark_and_every_bid(wording):
     name, payload = calls[0]
     assert name == "draft_review_wording"
     assert payload["tender_ref"] == "TENDER/NC/2026/014"
-    assert payload["description"] == "construction of classroom blocks"
-    assert payload["benchmark"] == benchmark()
-    assert payload["excluded"] == {"different_work": 4, "no_value": 2}
-    apex, bora = payload["bids"]
-    assert apex == {"bidder": "Apex", "total": 5_000_000.0, "pct_vs_median": 4.2,
-                    "position": "within_range", "arithmetic_issues": []}
-    assert bora["arithmetic_issues"] == ["Stated total 9000000.00 does not match computed total 8400000.00"]
-    assert [a["award_id"] for a in payload["awards"]] == ["a01", "a02", "a03"]
+    assert payload["pool_size"] == 3
+    assert [finding["key"] for finding in payload["findings"]] == ["pool", "bid:2", "arithmetic:3"]
+    assert "median" not in str(payload)
+    assert "KES" not in str(payload)
 
 
-def test_the_award_payload_is_only_what_the_report_needs(wording):
-    calls = wording()
-
-    draft_node(state())
-
-    assert calls[0][1]["awards"][0] == {"award_id": "a01", "title": "Classroom block construction",
-                                        "value_kes": 4_000_000.0, "buyer_name": "Ministry of Education",
-                                        "data_year": 2024}
-
-
-def test_the_review_passes_the_search_echo_and_the_exclusions(wording):
+def test_code_builds_typed_pool_and_bid_findings(wording):
     wording()
 
     result = draft_node(state())
 
-    assert "## Comparison pool" in result["review_markdown"]
-    assert "match=loose" in result["review_markdown"]
-    assert "different_work (4)" in result["review_markdown"]
+    assert {bid["bidder"] for bid in result["report_model"]["bids"]} == {"Apex", "Bora", "Zed"}
+    assert result["report_model"]["benchmark"]["median"] == 2_839_845.72
+    assert result["report_model"]["annex_pool"][0]["award_id"] == "a01"
+
+    pool_finding, bid_finding, arithmetic = result["findings"]
+    assert pool_finding["kind"] == "pool"
+    assert "2,839,845.72" not in pool_finding["sources"][0]
+    assert pool_finding["sources"] == [
+        {"kind": "pool", "award_id": "a01"},
+        {"kind": "pool", "award_id": "a02"},
+        {"kind": "pool", "award_id": "a03"},
+    ]
+    assert bid_finding["kind"] == "bid"
+    assert bid_finding["sources"][0] == {"kind": "bid", "bidder": "Bora",
+                                         "file": "bora.pdf", "page": 3}
+    assert arithmetic["sources"] == [{"kind": "bid", "bidder": "Zed",
+                                      "file": "zed.pdf", "page": 1}]
 
 
-def test_the_sources_table_lists_exactly_the_cited_awards(wording):
+def test_the_bid_finding_cites_the_bid_and_the_whole_pool(wording):
     wording()
 
     result = draft_node(state())
 
-    assert [s["award_id"] for s in result["sources"]] == ["a01", "a02"]
-    assert result["sources"][0]["ocid"] == "ocid-a01"
-    assert "a03" not in result["review_markdown"].split("## Sources")[1]
+    bid_finding = result["findings"][1]
+    assert [source.get("award_id") for source in bid_finding["sources"][1:]] == [
+        "a01", "a02", "a03"]
+    assert "205% above" in bid_finding["text"]
+    assert "far above the upper quartile" in bid_finding["text"]
 
 
-def test_a_cited_award_is_listed_once_even_when_two_findings_use_it(wording):
-    wording(answer={**ANSWER, "findings": [{"text": FINDING, "sources": ["a01", "a02"]},
-                                           {"text": "Two more similar awards exist.", "sources": ["a01", "a02"]}]})
+def test_the_arithmetic_finding_computes_the_difference_from_the_two_totals(wording):
+    wording()
 
     result = draft_node(state())
 
-    assert [s["award_id"] for s in result["sources"]] == ["a01", "a02"]
+    arithmetic = result["findings"][2]
+    assert "KES 2,750,000.00" in arithmetic["text"]
+    assert "KES 2,690,000.00" in arithmetic["text"]
+    assert "KES 60,000.00" in arithmetic["text"]
+
+
+def test_model_notes_are_appended_but_never_become_figures(wording):
+    wording()
+
+    result = draft_node(state())
+
+    assert "The pool is small" in result["summary"]
+    assert "The scope should be checked" in result["findings"][1]["text"]
+    assert result["summary_note"] == NOTES["summary_note"]
+    assert result["finding_notes"] == NOTES["finding_notes"]
+
+
+def test_a_note_with_a_figure_is_refused_and_no_report_is_written(wording):
+    bad = {"summary_note": "Eleven awards were compared.", "finding_notes": {}}
+    wording(answer=bad)
+
+    result = draft_node(state())
+
+    assert result["review_markdown"] == ""
+    assert "summary note" in result["errors"][0]
+    assert result["verify_rounds"] == 1
+
+
+def test_the_final_attempt_renders_without_notes_instead_of_failing(wording):
+    wording(raises=LlmError("groq timed out"))
+
+    result = draft_node(state(verify_rounds=1))
+
+    assert result["report_degraded"] is True
+    assert result["review_markdown"].startswith("# Price review evidence")
+    assert "## Method" in result["review_markdown"]
+
+
+def test_the_sources_table_lists_every_pool_award(wording):
+    wording()
+
+    result = draft_node(state())
+
+    assert [source["award_id"] for source in result["sources"]] == ["a01", "a02", "a03"]
     assert result["review_markdown"].count("| a01 |") == 1
 
 
-def test_the_model_wording_lands_in_the_report(wording):
+def test_the_report_has_no_old_number_defects(wording):
     wording()
 
-    result = draft_node(state())
+    markdown = draft_node(state())["review_markdown"]
 
-    assert result["summary"] == SUMMARY
-    assert result["findings"][0]["text"] == FINDING
-    assert "87.5% above the median" in result["review_markdown"]
-    assert "does not recommend an award" in result["review_markdown"]
+    assert "Twenty" not in markdown
+    assert "twenty-five" not in markdown
+    assert "?KES" not in markdown
+    assert "-3% below" not in markdown
+    assert "3% below" in markdown
 
 
-def test_a_second_draft_replaces_the_findings_instead_of_adding_to_them(wording):
+def test_the_classroom_fixture_defects_stay_fixed(wording):
+    wording(answer={"summary_note": "The pool rests on similar classroom work.",
+                    "finding_notes": {
+                        "pool": "The comparison rests on similar classroom work.",
+                        "bid:1": "The total is well below the normal range.",
+                        "arithmetic:2": "The stated total and the line items disagree."}})
+    fixture = state(
+        benchmark={"n": 25, "confidence": "high", "median_kes": 2_373_706.18,
+                   "q1_kes": 1_999_310.0, "q3_kes": 3_587_126.0,
+                   "bids": [{"bidder": "Karuru Works Agency Ltd", "total": 1_228_000.0,
+                             "pct_vs_median": -48.3, "position": "below_range"},
+                            {"bidder": "Nyando Enterprises Ltd", "total": 2_833_600.0,
+                             "pct_vs_median": 19.4, "position": "within_range"}]},
+        bids=[{"bidder": "Karuru Works Agency Ltd", "file": "karuru.pdf", "total_page": 2,
+               "stated_total": 1_228_000.0, "computed_total": 1_228_000.0,
+               "arithmetic_ok": True, "status": "ok", "issues": []},
+              {"bidder": "Nyando Enterprises Ltd", "file": "nyando.pdf", "total_page": 3,
+               "stated_total": 2_833_600.0, "computed_total": 2_683_600.0,
+               "arithmetic_ok": False, "status": "ok",
+               "issues": ["Stated total 2833600.00 does not match computed total 2683600.00"]}],
+        pool=[award("20260309112625-155041", 2_373_706.18),
+              award("20260408125751-156392", 3_587_126.0),
+              award("20240214131435-72591", 1_999_310.0)],
+        excluded={"different_work": 4, "scale_mismatch": 1})
+
+    markdown = draft_node(fixture)["review_markdown"]
+
+    assert "KES 2,373,706.18" in markdown
+    assert "2373706.18 KES" not in markdown
+    assert "48% below" in markdown
+    assert "48.3% below" not in markdown
+    assert "Twenty" not in markdown
+    assert "twenty-five" not in markdown
+    assert "Nyando Enterprises Ltd, nyando.pdf p.3" in markdown
+    assert "different work (4)" in markdown
+    assert "scale_mismatch" not in markdown
+
+
+def test_same_input_writes_the_same_file(wording):
     wording()
-    first = draft_node(state())
-    wording(answer={**ANSWER, "findings": [{"text": "A different finding.", "sources": ["a03"]}]})
 
-    second = draft_node(state(**{**first, "verify_rounds": 1}))
+    first = draft_node(state())["review_markdown"]
+    second = draft_node(state())["review_markdown"]
 
-    assert [f["text"] for f in second["findings"]] == ["A different finding."]
-    assert second["verify_rounds"] == 2
-    assert "A different finding." in second["review_markdown"]
-    assert FINDING not in second["review_markdown"]
+    assert first == second
+
+
+def test_a_committee_file_comes_out_with_its_fixed_sections(wording):
+    wording()
+
+    markdown = draft_node(state())["review_markdown"]
+
+    assert markdown.startswith("# Price review evidence: TENDER/NC/2026/014")
+    for heading in ("## Bottom line", "## Bids", "## Method",
+                    "## Annex: comparable awards"):
+        assert heading in markdown
+    for award_id in ("a01", "a02", "a03"):
+        assert award_id in markdown
+
+
+def test_the_bid_table_shows_the_total_the_percentage_and_the_position(wording):
+    wording()
+
+    markdown = draft_node(state())["review_markdown"]
+    bids_section = markdown.split("## Bids")[1].split("## Method")[0]
+
+    assert "8,650,000.00" in bids_section
+    assert "205% above" in bids_section
+    assert "far above the usual price" in bids_section
 
 
 def test_verify_rounds_counts_every_draft(wording):
@@ -161,66 +276,6 @@ def test_verify_rounds_counts_every_draft(wording):
     result = draft_node(state(verify_rounds=1))
 
     assert result["verify_rounds"] == 2
-
-
-def test_a_rejected_wording_is_recorded_and_no_report_is_written(wording):
-    wording(answer={**ANSWER, "findings": [{"text": "The cheapest bidder is the winner.", "sources": ["a01"]}]})
-
-    result = draft_node(state())
-
-    assert result["review_markdown"] == ""
-    assert "winner" in result["errors"][0]
-    assert "draft_review_file" in result["errors"][0]
-
-
-def test_a_rejected_wording_leaves_the_earlier_report_alone(wording):
-    wording()
-    first = draft_node(state())
-    wording(answer={**ANSWER, "findings": [{"text": "No sources here.", "sources": []}]})
-
-    second = draft_node(state(**{**first, "verify_rounds": 1}))
-
-    assert second["review_markdown"] == ""
-    assert "errors" in second
-    assert second["verify_rounds"] == 2
-
-
-def test_a_model_citing_an_award_that_was_never_in_the_pool_is_refused(wording):
-    wording(answer={**ANSWER, "findings": [{"text": FINDING, "sources": ["a99"]}]})
-
-    result = draft_node(state())
-
-    assert result["review_markdown"] == ""
-    assert "a99" in result["errors"][0]
-    assert result["sources"] == []
-
-
-def test_a_committee_file_comes_out_with_its_fixed_sections(wording):
-    wording()
-
-    result = draft_node(state())
-
-    markdown = result["review_markdown"]
-    assert markdown.startswith("# Price review evidence: TENDER/NC/2026/014")
-    assert "## Summary" in markdown
-    assert "## Comparison pool" in markdown
-    assert "## Bids" in markdown
-    assert "## Findings" in markdown
-    assert "## Limitations" in markdown
-    assert "## Sources" in markdown
-    assert "Sources: a01, a02" in markdown
-
-
-def test_the_bid_table_shows_the_total_the_percentage_and_the_position(wording):
-    wording()
-
-    result = draft_node(state())
-
-    bids_section = result["review_markdown"].split("## Bids")[1].split("## Findings")[0]
-    assert "9,000,000.00" in bids_section
-    assert "87.5%" in bids_section
-    assert "far_above" in bids_section
-    assert "87.5% above the median of eighteen similar awards." in bids_section
 
 
 def test_the_draft_call_is_logged_under_the_run(wording, audit_conn):
@@ -232,4 +287,3 @@ def test_the_draft_call_is_logged_under_the_run(wording, audit_conn):
     assert [r["tool"] for r in rows] == ["draft_review_file"]
     assert rows[0]["run_id"] == "run-1"
     assert rows[0]["input"]["review"]["tender_ref"] == "TENDER/NC/2026/014"
-    assert rows[0]["output"]["markdown"].startswith("# Price review evidence")

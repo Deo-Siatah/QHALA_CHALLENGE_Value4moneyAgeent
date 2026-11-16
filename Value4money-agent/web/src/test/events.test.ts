@@ -15,7 +15,8 @@ describe("the reducer, against a recorded run", () => {
     expect(view.runId).toBe("run-replay");
     expect(view.status).toBe("awaiting_approval");
     const done = STEPS.filter((step) => view.steps[step].status === "done");
-    expect(done).toEqual(["intake", "research", "quality_check", "score", "draft", "verify_sources"]);
+    expect(done).toEqual(["tender_intake", "bid_intake", "confirm_intake", "research",
+      "quality_check", "score", "draft", "verify_sources"]);
   });
 
   it("keeps each step's own time", () => {
@@ -42,13 +43,13 @@ describe("the reducer, against a recorded run", () => {
 
   it("marks the step that is running and clears it when the step finishes", () => {
     const started = play(REPLAY.slice(0, 2));
-    expect(started.currentStep).toBe("intake");
-    expect(started.steps.intake.status).toBe("running");
+    expect(started.currentStep).toBe("tender_intake");
+    expect(started.steps.tender_intake.status).toBe("running");
 
-    // Through the step.finished for intake and no further, so nothing is in flight.
-    const finished = play(REPLAY.slice(0, 6));
+    // Through the step.finished for bid_intake and no further, so nothing is in flight.
+    const finished = play(REPLAY.slice(0, 8));
     expect(finished.currentStep).toBeNull();
-    expect(finished.steps.intake.status).toBe("done");
+    expect(finished.steps.bid_intake.status).toBe("done");
   });
 
   it("keeps the clock moving while a step is silent", () => {
@@ -75,7 +76,7 @@ describe("the reducer, against a recorded run", () => {
   it("opens the model's words while they arrive and folds them away when it finishes", () => {
     const streaming = play([
       { type: "run.started", run_id: "r", steps: [], started_at: "" },
-      { type: "step.started", step: "draft", index: 4, at: "" },
+      { type: "step.started", step: "draft", index: 6, at: "" },
       { type: "model.token", step: "draft", delta: "Seventeen awards " },
       { type: "model.token", step: "draft", delta: "were compared." },
     ]);
@@ -118,10 +119,10 @@ describe("the reducer, against a recorded run", () => {
   });
 
   it("survives seeing the same step twice, as a reconnecting stream will deliver it", () => {
-    const once = play(REPLAY.slice(0, 6));
-    const twice = play(REPLAY.slice(0, 6), once);
+    const once = play(REPLAY.slice(0, 8));
+    const twice = play(REPLAY.slice(0, 8), once);
 
-    expect(twice.steps.intake).toEqual(once.steps.intake);
+    expect(twice.steps.bid_intake).toEqual(once.steps.bid_intake);
   });
 
   it("takes the step truth from a snapshot as well as from the events, so a reload is not a blank page", () => {
@@ -131,14 +132,18 @@ describe("the reducer, against a recorded run", () => {
       tender_ref: "MDE/EDU/2026/CLS/022",
       category: "works",
       description: "construction of classroom blocks",
+      tender: {},
+      tender_missing: [],
+      intake_confirmed: true,
+      intake_issues: [],
       current_step: "approval",
       elapsed_ms: 41_200,
       steps: STEPS.map((step, index) => ({
         step,
         index,
-        status: index < 6 ? "done" : index === 6 ? "running" : "pending",
-        elapsed_ms: index < 6 ? 1000 : 0,
-        summary: index === 2 ? "pool 17 · excluded 13" : "",
+        status: index < 8 ? "done" : index === 8 ? "running" : "pending",
+        elapsed_ms: index < 8 ? 1000 : 0,
+        summary: index === 4 ? "pool 17 · excluded 13" : "",
       })),
       bids: [],
       benchmark: null,

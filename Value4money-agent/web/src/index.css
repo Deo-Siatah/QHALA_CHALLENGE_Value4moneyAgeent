@@ -23,7 +23,7 @@
 
 @theme {
   --color-paper: #ffffff;
-  --color-ground: #f8fafc;
+  --color-ground: #f4f8fc;
 
   --color-ink-100: #f1f5f9;
   --color-ink-200: #e2e8f0;
@@ -33,10 +33,10 @@
   --color-ink-700: #334155;
   --color-ink-900: #0f172a;
 
-  --color-accent: #4f46e5;
-  --color-accent-strong: #4338ca;
-  --color-accent-soft: #eef2ff;
-  --color-accent-glow: #6366f1;
+  --color-accent: #1769d2;
+  --color-accent-strong: #0f4fa8;
+  --color-accent-soft: #eaf3ff;
+  --color-accent-glow: #4b9bff;
 
   --color-done: #059669;
   --color-done-soft: #ecfdf5;
@@ -51,6 +51,7 @@
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
     sans-serif;
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
 }
 
@@ -61,6 +62,15 @@
 
   body {
     @apply bg-ground text-ink-700 font-sans antialiased;
+    background-image: linear-gradient(135deg, rgb(255 255 255 / 0.9), transparent 42%),
+      linear-gradient(180deg, #f8fbff 0%, #f4f8fc 100%);
+    background-attachment: fixed;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
   }
 
   /* Focus is never removed, only made visible: this interface is used by people reading figures. */

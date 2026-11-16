@@ -26,16 +26,42 @@ export function ReportView({ runId, snapshot }: { runId: string; snapshot: RunSn
     retry: false,
   });
   const [copied, setCopied] = useState(false);
+  const [orientation, setOrientation] = useState<"portrait" | "landscape">("landscape");
+  const [paperSize, setPaperSize] = useState<"A4" | "Letter">("A4");
+  const printOptions = { orientation, paperSize };
 
   return (
-    <Card>
+    <Card className="print-only">
       <CardHeader className="flex flex-wrap items-center justify-between gap-3">
         <CardTitle>The evidence file</CardTitle>
         <div className="no-print flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => window.print()}>
+          <label className="flex items-center gap-2 text-xs text-ink-500">
+            <span>Page</span>
+            <select aria-label="Page orientation" value={orientation}
+              onChange={(event) => setOrientation(event.target.value as typeof orientation)}
+              className="rounded border border-ink-300 bg-paper px-2 py-1 text-xs text-ink-700">
+              <option value="landscape">Landscape</option>
+              <option value="portrait">Portrait</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-xs text-ink-500">
+            <span>Size</span>
+            <select aria-label="Paper size" value={paperSize}
+              onChange={(event) => setPaperSize(event.target.value as typeof paperSize)}
+              className="rounded border border-ink-300 bg-paper px-2 py-1 text-xs text-ink-700">
+              <option value="A4">A4</option>
+              <option value="Letter">Letter</option>
+            </select>
+          </label>
+          <a
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+            href={reportUrl(runId, "pdf", printOptions)}
+            target="_blank"
+            rel="noreferrer"
+          >
             <Printer className="size-4" />
-            Print
-          </Button>
+            Print report
+          </a>
           <Button
             variant="outline"
             size="sm"
@@ -51,7 +77,8 @@ export function ReportView({ runId, snapshot }: { runId: string; snapshot: RunSn
             <Copy className="size-4" />
             {copied ? "Copied" : "Copy markdown"}
           </Button>
-          <a className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href={reportUrl(runId, "pdf")}>
+          <a className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+            href={reportUrl(runId, "pdf", printOptions)}>
             <FileDown className="size-4" />
             Download PDF
           </a>

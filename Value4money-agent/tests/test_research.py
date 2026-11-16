@@ -55,10 +55,11 @@ def searched(monkeypatch):
     calls = []
 
     def install(result=None):
-        def fake_search(run_id, query, category, buyer_id, match, min_year, exclude_ocid):
+        def fake_search(run_id, query, category, buyer_id, match, min_year, exclude_ocid,
+                        required_terms=None):
             calls.append({"run_id": run_id, "query": query, "category": category,
                           "buyer_id": buyer_id, "match": match, "min_year": min_year,
-                          "exclude_ocid": exclude_ocid})
+                          "exclude_ocid": exclude_ocid, "required_terms": required_terms})
             return result if result is not None else search_result(2, [candidate("a01"), candidate("a02")])
 
         monkeypatch.setattr(research, "find_comparable_awards", fake_search)
@@ -363,7 +364,7 @@ def test_the_fallback_widens_one_step_at_a_time(asked, searched):
 
 
 def test_the_model_answers_again_after_a_failed_attempt(asked, searched):
-    asked()
+    asked(dict(MOVE, min_year=2023))
     searched()
 
     result = run(match="strict", min_year=2023, search_attempts=1)[1]
@@ -472,3 +473,12 @@ def test_the_widening_after_a_model_answer_is_still_widened_by_a_rule(monkeypatc
     research.research_node(state)
 
     assert state["match"] != "strict"
+
+def test_core_terms_are_required_on_every_search(asked, searched):
+    """Widening changes how loosely titles match, never what kind of work is required."""
+    asked()
+    calls = searched()
+
+    run(core_terms=["classroom", "block"], search_attempts=0)
+
+    assert calls[0]["required_terms"] == ["classroom", "block"]

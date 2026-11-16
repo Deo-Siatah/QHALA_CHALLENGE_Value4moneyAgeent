@@ -10,7 +10,7 @@ import { cn } from "../lib/utils";
  * The run, in one place.
  *
  * While Hasibu works, the page must not be a stack of cards: a reader watching a review wants the
- * one thing that is happening now, not eight panels to scroll past. So processing uses a single
+ * one thing that is happening now, not a stack of panels to scroll past. So processing uses a single
  * focal slot. A numbered badge names the step, the detail streams live inside it, and when the step
  * finishes the badge turns into a tick and the same slot is handed to the next step.
  *
@@ -49,7 +49,7 @@ export function StepStream({
 }) {
   if (phase === "summary") {
     return (
-      <ol className={cn("space-y-2", className)} aria-label="Progress">
+      <ol className={cn("relative space-y-2", className)} aria-label="Progress">
         {STEPS.map((step) => (
           <SummaryRow
             key={step}
@@ -95,10 +95,10 @@ function FocalStep({
   return (
     <div className={cn("mx-auto w-full max-w-2xl", className)} aria-label="Progress">
       <div
-        className="animate-slot-in overflow-hidden rounded-xl border border-ink-200 bg-paper shadow-lift"
+        className="animate-slot-in overflow-hidden rounded-xl border border-blue-100 bg-paper shadow-lift"
         key={step}
       >
-        <div className="flex flex-col items-center gap-3 border-b border-ink-200 px-5 py-6 text-center">
+        <div className="flex flex-col items-center gap-3 border-b border-blue-100 bg-accent-soft/25 px-5 py-6 text-center">
           <StepBadge index={index} running={running} done={done} />
           <div className="min-w-0">
             <p
@@ -171,8 +171,8 @@ function SummaryRow({
   return (
     <li
       className={cn(
-        "overflow-hidden rounded-lg border bg-paper transition-shadow",
-        running ? "border-accent/40 shadow-lift" : done ? "border-ink-200 shadow-soft" : "border-ink-200",
+        "relative z-10 overflow-hidden rounded-lg border bg-paper transition-shadow",
+        running ? "border-accent/40 shadow-lift" : done ? "border-blue-100 shadow-soft" : "border-ink-200",
       )}
     >
       <button

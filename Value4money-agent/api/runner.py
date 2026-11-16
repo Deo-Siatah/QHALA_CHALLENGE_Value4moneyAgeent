@@ -42,9 +42,11 @@ class RunError(RuntimeError):
 class Run:
     """One run: its id, its files, where it got to, and the channel its events arrive on."""
 
-    def __init__(self, run_id: str, pdf_paths: List[str], sequence: int = 0) -> None:
+    def __init__(self, run_id: str, pdf_paths: List[str], sequence: int = 0,
+                 tender_path: Optional[str] = None) -> None:
         self.run_id = run_id
         self.pdf_paths = list(pdf_paths)
+        self.tender_path = tender_path
         self.sequence = sequence
         self.status = models.RunStatus.queued
         self.channel = RunEventChannel()
@@ -115,7 +117,8 @@ class Runner:
 
     # ---- starting and resuming -----------------------------------------------------------
 
-    def start(self, run_id: str, pdf_paths: List[str]) -> Run:
+    def start(self, run_id: str, pdf_paths: List[str],
+              tender_path: Optional[str] = None) -> Run:
         """Claim a run id, put the run on a thread, and return at once. The events are on its channel.
 
         The id is the caller's, and a caller must never take it from a request body: it becomes a
@@ -127,7 +130,7 @@ class Runner:
         with self._lock:
             if run_id in self._runs:
                 raise RunError(f"run {run_id} already exists")
-            run = Run(run_id, pdf_paths, next(self._sequence))
+            run = Run(run_id, pdf_paths, next(self._sequence), tender_path)
             self._runs[run_id] = run
         run.started_monotonic = time.monotonic()
         self._executor.submit(self._drive, run, None, None)
@@ -176,7 +179,7 @@ class Runner:
                                                started_at=run.started_at))
 
         payload: Any = command if command is not None else initial_state(
-            run.run_id, run.pdf_paths, run.started_at)
+            run.run_id, run.pdf_paths, run.started_at, run.tender_path)
 
         def work() -> None:
             reset_trace_tags()

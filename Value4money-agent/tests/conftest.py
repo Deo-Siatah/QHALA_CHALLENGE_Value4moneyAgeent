@@ -86,7 +86,9 @@ def _reports_session():
             "run_id TEXT NOT NULL, "
             "created_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
             "body_md TEXT NOT NULL, "
-            "approved_by TEXT)"
+            "approved_by TEXT, "
+            "fingerprint TEXT, "
+            "review_json JSONB)"
         )
         conn.commit()
         yield conn
@@ -160,3 +162,86 @@ def audit_conn(_audit_session):
     _audit_session.execute("TRUNCATE audit_log RESTART IDENTITY")
     _audit_session.commit()
     return _audit_session
+
+
+@pytest.fixture
+def report_state():
+    """A complete run state with a readable pool, three comparable bids and one unreadable bid."""
+    def award(award_id, value):
+        return {"award_id": award_id, "ocid": f"ocid-{award_id}", "data_year": 2024,
+                "title": "Classroom block construction", "buyer_name": "Ministry of Education",
+                "value_kes": value}
+
+    return {
+        "run_id": "run-1",
+        "tender_ref": "TENDER/NC/2026/014",
+        "started_at": "2026-10-19T11:09:22+00:00",
+        "description": "construction of classroom blocks",
+        "tender_fields": {
+            "title": {"value": "Construction of classroom blocks"},
+            "buyer": {"value": "Ministry of Education"},
+            "county": {"value": "Nairobi"},
+        },
+        "bids": [
+            {"bidder": "Apex", "file": "apex.pdf", "total_page": 2,
+             "stated_total": 3_150_000.0, "computed_total": 3_150_000.0,
+             "arithmetic_ok": True, "status": "ok", "confidence": "high",
+             "issues": [], "flagged_pages": [], "unresolved_pages": []},
+            {"bidder": "Zed", "file": "zed.pdf", "total_page": 1,
+             "stated_total": 2_750_000.0, "computed_total": 2_690_000.0,
+             "arithmetic_ok": False, "status": "ok", "confidence": "high",
+             "issues": ["Stated total 2750000.00 does not match computed total 2690000.00"],
+             "flagged_pages": [], "unresolved_pages": []},
+            {"bidder": "Bora", "file": "bora.pdf", "total_page": 3,
+             "stated_total": 8_650_000.0, "computed_total": 8_650_000.0,
+             "arithmetic_ok": True, "status": "ok", "confidence": "high",
+             "issues": [], "flagged_pages": [], "unresolved_pages": []},
+            {"bidder": "Broken", "file": "broken.pdf", "total_page": None,
+             "stated_total": None, "computed_total": None,
+             "arithmetic_ok": False, "status": "needs_review", "confidence": "low",
+             "issues": [], "flagged_pages": [{"page": 2, "kind": "scan"}],
+             "unresolved_pages": [{"page": 2, "text": ""}]},
+        ],
+        "benchmark": {
+            "n": 11, "confidence": "high", "median_kes": 2_839_845.72,
+            "q1_kes": 1_956_829.0, "q3_kes": 3_494_974.74,
+            "bids": [
+                {"bidder": "Apex", "total": 3_150_000.0, "pct_vs_median": 10.9,
+                 "position": "within_range"},
+                {"bidder": "Zed", "total": 2_750_000.0, "pct_vs_median": -3.2,
+                 "position": "within_range"},
+                {"bidder": "Bora", "total": 8_650_000.0, "pct_vs_median": 204.6,
+                 "position": "far_above"},
+            ],
+        },
+        "pool": [award("a01", 2_501_490.0), award("a03", 2_839_845.72),
+                 award("a02", 3_289_999.48)],
+        "excluded": {"different_work": 4, "scale_mismatch": 1},
+        "excluded_awards": [
+            {"award_id": "a09", "title": "Pit latrine works",
+             "value_kes": 1_000_000.0, "reason_code": "different_work"}],
+        "summary_note": "SENTINEL_NOTE",
+        "report_degraded": False,
+        "findings": [],
+        "sources": [],
+    }
+
+
+@pytest.fixture
+def report_review(report_state):
+    """The Phase 2 review shape the report model is built from."""
+    return {
+        "run_id": report_state["run_id"],
+        "tender_ref": report_state["tender_ref"],
+        "summary_note": report_state["summary_note"],
+        "benchmark": report_state["benchmark"],
+        "findings": report_state["findings"],
+        "sources": report_state["sources"],
+        "report_degraded": report_state["report_degraded"],
+    }
+
+
+@pytest.fixture
+def report_model(report_review, report_state):
+    from mcp_server.tools.report_model import build_report_model
+    return build_report_model(report_review, report_state)

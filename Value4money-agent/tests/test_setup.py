@@ -35,7 +35,8 @@ class FakeConn:
             return FakeResult(rows=[{"version": self.version}])
         if "count(*)" in text and "FROM awards" in text:
             return FakeResult(value=self.awards)
-        if text.startswith("--") or text.upper().startswith("CREATE") or text.startswith("INSERT"):
+        if (text.startswith("--") or text.upper().startswith("CREATE")
+                or text.upper().startswith("ALTER") or text.startswith("INSERT")):
             self.applied.append(text[:60])
             return FakeResult()
         return FakeResult()
@@ -73,6 +74,18 @@ def test_it_applies_the_schema_before_the_indexes(fake_console):
 
     assert conn.applied[0].startswith("CREATE EXTENSION")
     assert conn.applied[1].startswith("CREATE INDEX")
+
+
+def test_report_columns_are_added_after_the_schema_and_before_the_indexes(fake_console):
+    conn = FakeConn()
+
+    apply_schema(conn, schema_sql="CREATE TABLE reports (id INT);",
+                 indexes_sql="CREATE INDEX IF NOT EXISTS i ON reports (id);",
+                 report_sql="ALTER TABLE reports ADD COLUMN IF NOT EXISTS fingerprint TEXT;")
+
+    assert conn.applied[0].startswith("CREATE TABLE")
+    assert conn.applied[1].startswith("ALTER TABLE")
+    assert conn.applied[2].startswith("CREATE INDEX")
 
 
 def test_the_demo_slice_is_only_loaded_when_there_is_no_data(fake_console):

@@ -24,14 +24,18 @@ that looks wrong. You are not judging the bids. You are judging these past award
 - `verdict` must be exactly one of: "keep", "exclude".
 - Every `award_id` in the input must appear exactly once. No other award_id may appear.
 - `reason` is one short sentence about the record.
+- An `exclude` verdict carries `reason_code`, exactly one of: "value_unusable" (the value cannot be
+  read as a price), "duplicate" (the record repeats another award), "suspected_typo" (the value is
+  evidently a data-entry slip), or "multi_scope" (the title bundles unrelated scopes that cannot be
+  compared as one kind of work). A `keep` verdict carries no reason_code.
 
 ## Example
 
 ```json
 {"verdicts": {
   "a07": {"verdict": "keep", "reason": "large multi-site classroom programme, not a stray figure"},
-  "a08": {"verdict": "exclude", "reason": "title is one classroom but the value covers a county programme"},
-  "a09": {"verdict": "exclude", "reason": "record has no supplier and reads as a test entry"}
+  "a08": {"verdict": "exclude", "reason": "title is one classroom but the value covers a county programme", "reason_code": "value_unusable"},
+  "a09": {"verdict": "exclude", "reason": "record has no supplier and reads as a test entry", "reason_code": "suspected_typo"}
 }}
 ```
 

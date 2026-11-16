@@ -32,12 +32,12 @@ tests/
 ```
 
 ## Own MCP tools (built one at a time)
-`parse_bid_pdf`, `find_comparable_awards`, `flag_data_quality`, `benchmark_price`, `draft_review_file`, `submit_for_committee` (refuses to run without `approved_by`).
+`parse_bid_pdf` (strict first, then layout tables), `extract_tender_pdf`, `record_intake_correction`, `find_comparable_awards`, `flag_data_quality`, `benchmark_price`, `draft_review_file`, `submit_for_committee` (refuses to run without `approved_by`).
 
 ## Architecture (decided)
-- Nodes: `intake → research
- → quality_check → score → draft → verify_sources → appro
- val → file`.
+- Nodes: `tender_intake → bid_intake → confirm_intake → research → quality_check → score → draft
+  → verify_sources → approval → file`.
+- Intake: `tender_intake` reads tender fields with page/line sources; `bid_intake` records each bid's status and confidence; `confirm_intake` interrupts only for scans or missing tender fields. The CLI keeps the gate; the web upload sets `intake_gate = False` and records the issues.
 - Loops: `quality_check → research` (max 3), `verify_sources → draft` (max 2). Approval is a LangGraph `interrupt`.
 - Nodes call tools directly in a fixed order. The model only does language jobs (judge similar awards, pick the next search move, typo vs real value, write the draft). **Code does all the maths.**
 - Audit logging is one wrapper in `agent/tools.py`, covering every call to every server.

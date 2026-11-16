@@ -1,8 +1,11 @@
-import pytest
+﻿import pytest
 
 from agent.nodes.verify_sources import verify_sources_node
 
 NOT_ENOUGH = "Not enough comparable awards to benchmark these bids."
+
+POOL_NOTE = "The awards cover similar classroom work."
+BID_NOTE = "The scope should be checked against the tender."
 
 
 @pytest.fixture(autouse=True)
@@ -20,37 +23,60 @@ def award(award_id, value=4_000_000.0, year=2024):
             "value_kes": value, "category": "works", "currency": "KES", "quality_flags": []}
 
 
+def pool_sources():
+    return [{"kind": "pool", "award_id": "a01"}, {"kind": "pool", "award_id": "a02"},
+            {"kind": "pool", "award_id": "a03"}]
+
+
+def clean_findings():
+    return [
+        {"key": "pool", "kind": "pool", "text":
+         "3 comparable awards have a median of KES 4,000,000.00 and a normal range of "
+         "KES 3,000,000.00 to KES 5,000,000.00.", "sources": pool_sources(),
+         "note": POOL_NOTE},
+        {"key": "bid:2", "kind": "bid", "text":
+         "Bora total KES 9,000,000.00 is 88% above the median of 3 similar awards, "
+         "far above the upper quartile.", "sources": [
+             {"kind": "bid", "bidder": "Bora", "file": "bora.pdf", "page": 2},
+             {"kind": "pool", "award_id": "a01"}, {"kind": "pool", "award_id": "a02"},
+             {"kind": "pool", "award_id": "a03"}], "note": BID_NOTE},
+    ]
+
+
 def state(**overrides):
     base = {
         "run_id": "run-1", "tender_ref": "TENDER/NC/2026/014",
         "description": "construction of classroom blocks",
-        "benchmark": {"n": 18, "confidence": "high", "median_kes": 4_800_000.0,
-                      "q1_kes": 4_100_000.0, "q3_kes": 5_600_000.0,
+        "benchmark": {"n": 3, "confidence": "medium", "median_kes": 4_000_000.0,
+                      "q1_kes": 3_000_000.0, "q3_kes": 5_000_000.0,
                       "sources": ["a01", "a02", "a03"],
-                      "bids": [{"bidder": "Apex", "total": 5_000_000.0, "pct_vs_median": 4.2,
+                      "bids": [{"bidder": "Apex", "total": 5_000_000.0, "pct_vs_median": 25.0,
                                 "position": "within_range"},
-                               {"bidder": "Bora", "total": 9_000_000.0, "pct_vs_median": 87.5,
-                                "position": "far_above"},
-                               {"bidder": "Zed", "total": 2_750_000.0, "pct_vs_median": -3.2,
-                                "position": "within_range"}]},
+                               {"bidder": "Bora", "total": 9_000_000.0, "pct_vs_median": 125.0,
+                                "position": "far_above"}]},
         "pool": [award("a01"), award("a02", 5_000_000.0), award("a03", 3_000_000.0, 2023)],
-        "bids": [{"bidder": "Apex", "tender_ref": "TENDER/NC/2026/014", "currency": "KES", "items": [],
-                  "stated_total": 5_000_000.0, "computed_total": 5_000_000.0, "arithmetic_ok": True,
-                  "issues": []},
-                 {"bidder": "Bora", "tender_ref": "TENDER/NC/2026/014", "currency": "KES", "items": [],
-                  "stated_total": 9_000_000.0, "computed_total": 9_000_000.0, "arithmetic_ok": True,
-                  "issues": []}],
-        "summary": "Eighteen awards of classroom construction were compared, and one bid total sits 87.5% above the median of that pool.",
-        "bid_comments": {"Apex": "4.2% above the median, inside the normal range.",
-                         "Bora": "87.5% above the median of eighteen similar awards."},
-        "findings": [{"text": "One bid total is 87.5% above the median of eighteen similar awards.",
-                      "sources": ["a01", "a02"]}],
+        "bids": [{"bidder": "Apex", "file": "apex.pdf", "total_page": 1,
+                  "tender_ref": "TENDER/NC/2026/014", "currency": "KES", "items": [],
+                  "stated_total": 5_000_000.0, "computed_total": 5_000_000.0,
+                  "arithmetic_ok": True, "status": "ok", "issues": []},
+                 {"bidder": "Bora", "file": "bora.pdf", "total_page": 2,
+                  "tender_ref": "TENDER/NC/2026/014", "currency": "KES", "items": [],
+                  "stated_total": 9_000_000.0, "computed_total": 9_000_000.0,
+                  "arithmetic_ok": True, "status": "ok", "issues": []}],
+        "summary": POOL_NOTE,
+        "summary_note": POOL_NOTE,
+        "finding_notes": {"pool": POOL_NOTE, "bid:2": BID_NOTE},
+        "report_degraded": False,
+        "findings": clean_findings(),
         "sources": [{"award_id": "a01", "ocid": "ocid-a01", "data_year": 2024,
                      "buyer_name": "Ministry of Education", "title": "Classroom block construction",
                      "value_kes": 4_000_000.0},
                     {"award_id": "a02", "ocid": "ocid-a02", "data_year": 2024,
                      "buyer_name": "Ministry of Education", "title": "Classroom works",
-                     "value_kes": 5_000_000.0}],
+                     "value_kes": 5_000_000.0},
+                    {"award_id": "a03", "ocid": "ocid-a03", "data_year": 2023,
+                     "buyer_name": "County Government", "title": "Classroom works",
+                     "value_kes": 3_000_000.0}],
         "review_markdown": "# Price review evidence: TENDER/NC/2026/014\n\n## Findings\n",
         "excluded": {"different_work": 1},
     }
@@ -80,15 +106,16 @@ def test_a_finding_without_a_source_fails():
     result = verify_sources_node(state(findings=[{"text": "Something is off.", "sources": []}]))
 
     assert result["verify_ok"] is False
-    assert "finding 1" in result["verify_failures"][0]
-    assert "no source" in result["verify_failures"][0]
+    assert any("finding 1" in failure and "no source" in failure
+               for failure in result["verify_failures"])
 
 
 def test_a_finding_citing_an_award_that_is_not_in_the_sources_fails():
-    result = verify_sources_node(state(findings=[{"text": "Eighteen awards.", "sources": ["a99"]}]))
+    result = verify_sources_node(state(findings=clean_findings() + [
+        {"kind": "pool", "text": "An extra award.", "sources": [{"kind": "pool", "award_id": "a99"}]}]))
 
     assert result["verify_ok"] is False
-    assert "a99" in result["verify_failures"][0]
+    assert any("a99" in failure for failure in result["verify_failures"])
 
 
 def test_a_finding_citing_an_award_outside_the_benchmarked_pool_fails():
@@ -96,105 +123,103 @@ def test_a_finding_citing_an_award_outside_the_benchmarked_pool_fails():
                                     "buyer_name": "County Government", "title": "Classroom works",
                                     "value_kes": 4_500_000.0}]
 
-    result = verify_sources_node(state(findings=[{"text": "Eighteen awards.", "sources": ["a04"]}],
-                                       sources=listed))
+    result = verify_sources_node(state(
+        findings=clean_findings() + [{"kind": "pool", "text": "An extra award.",
+                                      "sources": [{"kind": "pool", "award_id": "a04"}]}],
+        sources=listed))
 
     assert result["verify_ok"] is False
-    assert "a04" in result["verify_failures"][0]
+    assert any("a04" in failure for failure in result["verify_failures"])
 
 
-def test_a_figure_that_appears_nowhere_fails():
-    text = "One bid total is 1250000.0% above the median of eighteen similar awards."
+def test_a_bid_source_needs_the_bid_file_and_page_that_exist():
+    findings = clean_findings()
+    findings[1]["sources"][0]["file"] = "other.pdf"
 
-    result = verify_sources_node(state(findings=[{"text": text, "sources": ["a01"]}]))
-
-    assert result["verify_ok"] is False
-    assert "1250000" in result["verify_failures"][0]
-
-
-def test_a_figure_in_a_bid_comment_is_checked_too():
-    result = verify_sources_node(state(bid_comments={"Apex": "9999999.0% above the median.",
-                                                     "Bora": ""}))
+    result = verify_sources_node(state(findings=findings))
 
     assert result["verify_ok"] is False
-    assert "9999999" in result["verify_failures"][0]
+    assert any("other.pdf" in failure for failure in result["verify_failures"])
 
 
-def test_a_figure_in_the_summary_is_checked_too():
-    result = verify_sources_node(state(summary="The pool of 3 awards had a median of 4.1 million."))
+def test_a_bid_source_page_must_be_inside_the_document():
+    findings = clean_findings()
+    findings[1]["sources"][0]["page"] = 9
+
+    result = verify_sources_node(state(findings=findings))
 
     assert result["verify_ok"] is False
-    assert "3" in result["verify_failures"][0]
+    assert any("page 9" in failure or "p.9" in failure for failure in result["verify_failures"])
 
 
-@pytest.mark.parametrize("text", [
-    "One bid total is 87.5% above the median of eighteen similar awards.",
-    "The normal range is 4100000.0 to 5600000.0 KES.",
-    "Awards from 2024 and 2023 were used.",
-    "The largest was 9,000,000.00 and the median 4800000.0.",
-    "Apex sits 4.2% above the median.",
-    "Zed sits 3.2% below the median.",
-])
-def test_figures_that_exist_in_the_data_pass(text):
-    result = verify_sources_node(state(findings=[{"text": text, "sources": ["a01"]}]))
+def test_every_pooled_award_must_be_cited_by_a_finding():
+    findings = clean_findings()
+    findings[0]["sources"] = findings[0]["sources"][:2]
+    findings[1]["sources"] = [source for source in findings[1]["sources"]
+                              if source.get("award_id") != "a03"]
+
+    result = verify_sources_node(state(findings=findings))
+
+    assert result["verify_ok"] is False
+    assert any("a03" in failure for failure in result["verify_failures"])
+
+
+def test_a_far_bid_without_its_own_finding_fails():
+    result = verify_sources_node(state(findings=clean_findings()[:1]))
+
+    assert result["verify_ok"] is False
+    assert any("Bora" in failure and "finding" in failure for failure in result["verify_failures"])
+
+
+def test_an_arithmetic_failure_without_its_own_finding_fails():
+    bids = state()["bids"]
+    bids[0]["arithmetic_ok"] = False
+    bids[0]["computed_total"] = 4_900_000.0
+
+    result = verify_sources_node(state(bids=bids))
+
+    assert result["verify_ok"] is False
+    assert any("Apex" in failure and "arithmetic" in failure for failure in result["verify_failures"])
+
+
+def test_a_summary_note_with_a_figure_fails():
+    result = verify_sources_node(state(summary_note="The pool has 3 awards."))
+
+    assert result["verify_ok"] is False
+    assert any("summary note" in failure and "figure" in failure for failure in result["verify_failures"])
+
+
+def test_a_summary_note_with_a_number_word_fails():
+    result = verify_sources_node(state(summary_note="Three awards cover similar work."))
+
+    assert result["verify_ok"] is False
+    assert any("summary note" in failure and "number word" in failure
+               for failure in result["verify_failures"])
+
+
+def test_a_finding_note_with_a_bidder_name_fails():
+    notes = {"pool": POOL_NOTE, "bid:2": "Bora should be asked about the scope."}
+
+    result = verify_sources_node(state(finding_notes=notes))
+
+    assert result["verify_ok"] is False
+    assert any("bid:2" in failure and "bidder" in failure for failure in result["verify_failures"])
+
+
+def test_notes_over_the_word_limit_fail():
+    result = verify_sources_node(state(summary_note=" ".join(["word"] * 41)))
+
+    assert result["verify_ok"] is False
+    assert any("40 words" in failure for failure in result["verify_failures"])
+
+
+def test_a_degraded_report_verifies_without_notes():
+    result = verify_sources_node(state(summary_note=None, finding_notes={},
+                                       findings=[{**finding, "note": None}
+                                                 for finding in clean_findings()],
+                                       report_degraded=True))
 
     assert result["verify_ok"] is True, result["verify_failures"]
-
-
-def test_a_magnitude_with_the_wrong_sign_is_tolerated_but_a_written_minus_is_not():
-    below = verify_sources_node(state(bid_comments={"Apex": "3.2% below the median.",
-                                                     "Bora": "", "Zed": ""}))
-    assert below["verify_ok"] is True, below["verify_failures"]
-
-    invented = verify_sources_node(state(bid_comments={"Apex": "-3.2% below the median.",
-                                                        "Bora": "", "Zed": "12.5% below."}))
-    assert invented["verify_ok"] is False
-    assert any("12.5" in failure for failure in invented["verify_failures"])
-
-
-def test_no_findings_is_not_a_failure():
-    result = verify_sources_node(state(findings=[]))
-
-    assert result["verify_ok"] is True
-
-
-def test_a_thin_pool_must_say_so_in_the_report():
-    benchmark = {"n": 3, "confidence": "insufficient", "median_kes": None, "q1_kes": None,
-                 "q3_kes": None, "sources": ["a01"],
-                 "bids": [{"bidder": "Apex", "total": 5_000_000.0, "pct_vs_median": None,
-                           "position": None}]}
-
-    result = verify_sources_node(state(
-        benchmark=benchmark, summary="Three awards were found, which is not enough to compare.",
-        bid_comments={"Apex": "No comparison was possible.", "Bora": ""}, findings=[]))
-
-    assert result["verify_ok"] is False
-    assert any(NOT_ENOUGH in failure for failure in result["verify_failures"])
-
-
-def test_a_thin_pool_that_says_so_verifies():
-    benchmark = {"n": 3, "confidence": "insufficient", "median_kes": None, "q1_kes": None,
-                 "q3_kes": None, "sources": ["a01"],
-                 "bids": [{"bidder": "Apex", "total": 5_000_000.0, "pct_vs_median": None,
-                           "position": None}]}
-
-    result = verify_sources_node(state(
-        benchmark=benchmark,
-        summary="Three awards of classroom construction were found, which is not enough to compare.",
-        bid_comments={"Apex": "No comparison was possible.", "Bora": ""},
-        findings=[], review_markdown="# report\n\n" + NOT_ENOUGH + "\n"))
-
-    assert result["verify_ok"] is True, result["verify_failures"]
-
-
-def test_every_problem_is_reported_at_once():
-    result = verify_sources_node(state(
-        review_markdown="", findings=[{"text": "1250000.0% above.", "sources": ["a99"]}],
-        bid_comments={"Apex": "7777777.0% above."}))
-
-    assert result["verify_ok"] is False
-    assert len(result["verify_failures"]) >= 3
-    assert any("7777777" in f for f in result["verify_failures"])
 
 
 def test_the_node_never_calls_a_tool_or_a_model(monkeypatch):
@@ -208,6 +233,100 @@ def test_the_node_never_calls_a_tool_or_a_model(monkeypatch):
             monkeypatch.setattr(node, name, explode)
 
     assert verify_sources_node(state())["verify_ok"] is True
+
+
+def test_a_thin_pool_must_say_so_in_the_report():
+    benchmark = {"n": 3, "confidence": "insufficient", "median_kes": None, "q1_kes": None,
+                 "q3_kes": None, "sources": ["a01"],
+                 "bids": [{"bidder": "Apex", "total": 5_000_000.0, "pct_vs_median": None,
+                           "position": None}]}
+    findings = [{"kind": "pool", "text": "Only 3 comparable awards were found.",
+                 "sources": [{"kind": "pool", "award_id": "a01"}], "note": POOL_NOTE}]
+
+    result = verify_sources_node(state(
+        benchmark=benchmark, summary_note=POOL_NOTE, finding_notes={"pool": POOL_NOTE},
+        findings=findings, sources=[state()["sources"][0]], pool=[award("a01")],
+        summary="The pool is too small."))
+
+    assert result["verify_ok"] is False
+    assert any(NOT_ENOUGH in failure for failure in result["verify_failures"])
+
+
+def test_a_thin_pool_that_says_so_verifies():
+    benchmark = {"n": 3, "confidence": "insufficient", "median_kes": None, "q1_kes": None,
+                 "q3_kes": None, "sources": ["a01"],
+                 "bids": [{"bidder": "Apex", "total": 5_000_000.0, "pct_vs_median": None,
+                           "position": None}]}
+    findings = [{"kind": "pool", "text": "Only 3 comparable awards were found.",
+                 "sources": [{"kind": "pool", "award_id": "a01"}], "note": POOL_NOTE}]
+
+    result = verify_sources_node(state(
+        benchmark=benchmark, summary_note=POOL_NOTE, finding_notes={"pool": POOL_NOTE},
+        findings=findings, sources=[state()["sources"][0]], pool=[award("a01")],
+        summary="The pool is too small.",
+        review_markdown="# report\n\n" + NOT_ENOUGH + "\n", bids=[]))
+
+    assert result["verify_ok"] is True, result["verify_failures"]
+
+
+def test_a_thin_pool_may_not_label_a_bid_far_above_or_far_below():
+    state = {"run_id": "run-1", "review_markdown": "# Review\n\n" + NOT_ENOUGH + "\n",
+             "findings": [], "sources": [], "summary": "", "summary_note": None,
+             "finding_notes": {}, "report_degraded": True,
+             "bids": [{"bidder": "Bora Contractors (K) Ltd", "stated_total": 8650000.0}],
+             "pool": [], "pool_size": 2,
+             "benchmark": {"n": 2, "confidence": "insufficient", "median_kes": None,
+                           "q1_kes": None, "q3_kes": None,
+                           "bids": [{"bidder": "Bora Contractors (K) Ltd", "total": 8650000.0,
+                                     "pct_vs_median": 228639.5, "position": "far_above"}]}}
+
+    result = verify_sources_node(state)
+
+    assert result["verify_ok"] is False
+    assert any("no position" in failure or "cannot be labelled" in failure
+               for failure in result["verify_failures"])
+
+
+def test_a_thin_pool_may_not_carry_a_percentage_at_all():
+    state = {"run_id": "run-1",
+             "review_markdown": "# Review\n\nNot enough comparable awards to benchmark these bids.\n",
+             "findings": [], "sources": [], "summary": "", "summary_note": None,
+             "finding_notes": {}, "report_degraded": True, "bids": [], "pool": [],
+             "pool_size": 2,
+             "benchmark": {"n": 2, "confidence": "insufficient", "median_kes": None,
+                           "q1_kes": None, "q3_kes": None,
+                           "bids": [{"bidder": "Bora", "total": 8650000.0,
+                                     "pct_vs_median": 228639.5, "position": "far_above"}]}}
+
+    result = verify_sources_node(state)
+
+    assert result["verify_ok"] is False
+
+
+def test_a_real_pool_may_still_say_far_above():
+    findings = [{"kind": "pool", "text": "Awards set the context.",
+                 "sources": [{"kind": "pool", "award_id": "a01"}], "note": POOL_NOTE},
+                {"kind": "bid", "text": "Bora is far above the upper quartile.",
+                 "sources": [{"kind": "bid", "bidder": "Bora", "file": "bora.pdf", "page": 1},
+                             {"kind": "pool", "award_id": "a01"}], "note": BID_NOTE}]
+    state = {"run_id": "run-1",
+             "review_markdown": "# Review\n\nBora is far above the upper quartile.\n",
+             "findings": findings, "summary": POOL_NOTE, "summary_note": POOL_NOTE,
+             "finding_notes": {"pool": POOL_NOTE, "bid:1": BID_NOTE}, "report_degraded": False,
+             "sources": [{"award_id": "a01", "value_kes": 100.0}],
+             "bids": [{"bidder": "Bora", "file": "bora.pdf", "total_page": 1,
+                       "stated_total": 8650000.0, "arithmetic_ok": True, "status": "ok"}],
+             "pool": [{"award_id": "a01", "value_kes": 100.0}], "pool_size": 17,
+             "benchmark": {"n": 17, "confidence": "high", "median_kes": 2860000.0,
+                           "q1_kes": 1.0, "q3_kes": 3.0,
+                           "bids": [{"bidder": "Bora", "total": 8650000.0,
+                                     "pct_vs_median": 204.6, "position": "far_above"}]}}
+
+    result = verify_sources_node(state)
+
+    assert not [failure for failure in result["verify_failures"]
+                if "no position" in failure or "cannot be labelled" in failure]
+    assert result["verify_ok"] is True, result["verify_failures"]
 
 
 def test_a_whole_run_from_candidates_to_a_verified_report(monkeypatch, audit_conn):
@@ -227,34 +346,26 @@ def test_a_whole_run_from_candidates_to_a_verified_report(monkeypatch, audit_con
 
     def fake_wording(prompt_name, payload):
         assert prompt_name == "draft_review_wording"
-        bids = payload["bids"]
-        return {
-            "summary": f"{payload['benchmark']['n']} awards of classroom construction were compared, "
-                       f"and one bid total sits {bids[1]['pct_vs_median']}% above the median of that pool.",
-            "bid_comments": {b["bidder"]: f"{b['pct_vs_median']}% against the median." for b in bids},
-            "findings": [{"text": f"One bid total is {bids[1]['pct_vs_median']}% above the median of "
-                                 f"{payload['benchmark']['n']} similar awards.",
-                          "sources": ["a01", "a02"]}],
-            "sources_used": ["a01", "a02"],
-        }
+        keys = [finding["key"] for finding in payload["findings"]]
+        return {"summary_note": "The awards cover similar classroom work.",
+                "finding_notes": {key: "The scope should be read with the total." for key in keys}}
 
     monkeypatch.setattr(draft, "ask_json", fake_wording)
     monkeypatch.setattr(draft, "draft_review_file", draft_review_file)
 
-# The awards span 1.0M to 6.5M against a bid median of 9M. The smallest has to stay inside the
-    # scale band, ten times either side of the bid median, or quality_check drops it as a different
-    # size of job before the benchmark is built.
     pool_rows = [dict(award(f"a{i:02d}", float(i) * 500_000.0 + 500_000.0),
                       title="Classroom block construction") for i in range(1, 13)]
     current = {"run_id": "run-e2e", "tender_ref": "TENDER/NC/2026/014",
                "description": "construction of classroom blocks", "candidates": pool_rows,
                "quality_attempts": 0,
-               "bids": [{"bidder": "Apex", "tender_ref": "TENDER/NC/2026/014", "currency": "KES",
+               "bids": [{"bidder": "Apex", "file": "apex.pdf", "total_page": 1,
+                         "tender_ref": "TENDER/NC/2026/014", "currency": "KES",
                          "items": [], "stated_total": 6_000_000.0, "computed_total": 6_000_000.0,
-                         "arithmetic_ok": True, "issues": []},
-                        {"bidder": "Bora", "tender_ref": "TENDER/NC/2026/014", "currency": "KES",
+                         "status": "ok", "arithmetic_ok": True, "issues": []},
+                        {"bidder": "Bora", "file": "bora.pdf", "total_page": 2,
+                         "tender_ref": "TENDER/NC/2026/014", "currency": "KES",
                          "items": [], "stated_total": 12_000_000.0, "computed_total": 12_000_000.0,
-                         "arithmetic_ok": True, "issues": []}],
+                         "status": "ok", "arithmetic_ok": True, "issues": []}],
                "search": {"match": "loose", "category": "works", "min_year": None, "attempts": 1},
                "verify_rounds": 0}
 
@@ -269,77 +380,19 @@ def test_a_whole_run_from_candidates_to_a_verified_report(monkeypatch, audit_con
     assert result["verify_ok"] is True, result["verify_failures"]
 
 
-def test_a_figure_the_model_invents_fails_the_whole_run(monkeypatch):
+def test_a_note_with_a_figure_never_reaches_a_verified_report(monkeypatch):
     from agent.nodes import draft
     from agent.nodes.draft import draft_node
     from agent.tools import draft_review_file
 
     monkeypatch.setattr(draft, "draft_review_file", draft_review_file)
     monkeypatch.setattr(draft, "ask_json", lambda name, payload: {
-        "summary": "One bid is 999.5% above the median of the pool.",
-        "bid_comments": {}, "findings": [], "sources_used": []})
+        "summary_note": "The pool has 999.5 awards.", "finding_notes": {}})
 
     current = state()
     current.update(draft_node(current))
     result = verify_sources_node(current)
 
-    assert current["review_markdown"].startswith("# Price review evidence")
+    assert current["review_markdown"] == ""
     assert result["verify_ok"] is False
-    assert any("999.5" in failure for failure in result["verify_failures"])
-
-
-def test_a_thin_pool_may_not_label_a_bid_far_above_or_far_below(monkeypatch):
-    """A position computed against a handful of comparables is a guess wearing a percentage."""
-    from agent.nodes.verify_sources import verify_sources_node
-
-    state = {"run_id": "run-1", "review_markdown": "# Review\n\n" + NOT_ENOUGH + "\n",
-             "findings": [], "sources": [], "summary": "",
-             "bids": [{"bidder": "Bora Contractors (K) Ltd", "stated_total": 8650000.0}],
-             "pool": [], "pool_size": 2,
-"benchmark": {"n": 2, "confidence": "insufficient", "median_kes": None,
-                           "q1_kes": None, "q3_kes": None,
-                           "bids": [{"bidder": "Bora Contractors (K) Ltd", "total": 8650000.0,
-                                     "pct_vs_median": 228639.5, "position": "far_above"}]}}
-
-    result = verify_sources_node(state)
-
-    assert result["verify_ok"] is False
-    assert any("no position" in failure or "cannot be labelled" in failure
-               for failure in result["verify_failures"])
-
-
-def test_a_thin_pool_may_not_carry_a_percentage_at_all(monkeypatch):
-    from agent.nodes.verify_sources import verify_sources_node
-
-    state = {"run_id": "run-1",
-             "review_markdown": "# Review\n\nNot enough comparable awards to benchmark these bids.\n",
-             "findings": [{"text": "One bid is 228639.5% above the median of two similar awards.",
-                           "sources": []}],
-             "sources": [], "summary": "", "bids": [], "pool": [], "pool_size": 2,
-             "benchmark": {"n": 2, "confidence": "insufficient", "median_kes": None,
-                           "q1_kes": None, "q3_kes": None, "bids": []}}
-
-    result = verify_sources_node(state)
-
-    assert result["verify_ok"] is False
-
-
-def test_a_real_pool_may_still_say_far_above():
-    from agent.nodes.verify_sources import verify_sources_node
-
-    state = {"run_id": "run-1",
-             "review_markdown": "# Review\n\nOne bid is 204.6% above the median of 17 awards.\n",
-             "findings": [{"text": "One bid is 204.6% above the median of 17 similar awards.",
-                           "sources": ["a01"]}],
-             "sources": [{"award_id": "a01", "value_kes": 100.0}], "summary": "",
-             "bids": [{"bidder": "Bora", "stated_total": 8650000.0}],
-             "pool": [{"award_id": "a01", "value_kes": 100.0}], "pool_size": 17,
-             "benchmark": {"n": 17, "confidence": "high", "median_kes": 2860000.0,
-                           "q1_kes": 1.0, "q3_kes": 3.0,
-                           "bids": [{"bidder": "Bora", "total": 8650000.0,
-                                     "pct_vs_median": 204.6, "position": "far_above"}]}}
-
-    result = verify_sources_node(state)
-
-    assert not [failure for failure in result["verify_failures"]
-                if "no position" in failure or "cannot be labelled" in failure]
+    assert any("no review" in failure for failure in result["verify_failures"])

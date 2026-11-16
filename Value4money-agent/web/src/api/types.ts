@@ -4,9 +4,11 @@
 // generator. Nothing here is invented: if the server grows a field, this file grows with it, and
 // the names in both places are the same words the terminal prints.
 
-/** One run, one order. agent/cli.py:38 prints the same eight. */
+/** One run, one order. agent/cli.py:38 prints the same ten. */
 export const STEPS = [
-  "intake",
+  "tender_intake",
+  "bid_intake",
+  "confirm_intake",
   "research",
   "quality_check",
   "score",
@@ -20,7 +22,9 @@ export type Step = (typeof STEPS)[number];
 
 /** What a step is called on screen. "quality_check" is not a word a committee member reads. */
 export const STEP_WORDS: Record<Step, { title: string; subtitle: string }> = {
-  intake: { title: "Read the bids", subtitle: "Parsing the PDFs" },
+  tender_intake: { title: "Read the tender", subtitle: "Finding what was bought" },
+  bid_intake: { title: "Read the bids", subtitle: "Parsing the PDFs" },
+  confirm_intake: { title: "Confirm the reading", subtitle: "Checking totals and tender details" },
   research: { title: "Find comparable awards", subtitle: "Searching past public awards" },
   quality_check: { title: "Check the candidates", subtitle: "Judging which awards are the same work" },
   score: { title: "Benchmark the bids", subtitle: "Placing each total against the pool" },
@@ -52,6 +56,18 @@ export interface StepTiming {
   summary: string;
 }
 
+export interface TenderField {
+  value: unknown;
+  source?: { page?: number; text?: string };
+}
+
+export interface TenderResult {
+  fields?: Record<string, TenderField>;
+  missing?: string[];
+  rejected?: Array<Record<string, unknown>>;
+  pages?: Array<Record<string, unknown>>;
+}
+
 export interface BidView {
   bidder: string;
   total: number | null;
@@ -59,6 +75,8 @@ export interface BidView {
   position: string | null;
   comment: string;
   arithmetic_issues: string[];
+  status: string;
+  confidence: string;
 }
 
 export interface BenchmarkView {
@@ -89,6 +107,10 @@ export interface RunSnapshot {
   tender_ref: string | null;
   category: string | null;
   description: string | null;
+  tender: TenderResult;
+  tender_missing: string[];
+  intake_confirmed: boolean | null;
+  intake_issues: string[];
   current_step: Step | null;
   elapsed_ms: number;
   steps: StepTiming[];

@@ -2,8 +2,10 @@ import re
 from pathlib import Path
 from typing import List, Dict, Any
 import pypdf
-from pydantic import BaseModel, Field, validator
+from pypdf.errors import PyPdfError
+from pydantic import BaseModel, Field
 from config import settings
+from ..paths import PathOutsideError, resolve_inside
 
 
 class BidParseError(ValueError):
@@ -46,19 +48,10 @@ def parse_bid(path: Path, bids_dir: Path) -> Dict[str, Any]:
         BidParseError: For invalid input, missing fields, or malformed data
     """
     # Validate path security
-    if path.is_absolute():
-        resolved_path = path.resolve()
-        bids_dir_resolved = bids_dir.resolve()
-        if not str(resolved_path).startswith(str(bids_dir_resolved)):
-            raise BidParseError("Path outside bids directory")
-        check_path = resolved_path
-    else:
-        # For relative paths, resolve against bids_dir
-        resolved_path = (bids_dir / path).resolve()
-        bids_dir_resolved = bids_dir.resolve()
-        if not str(resolved_path).startswith(str(bids_dir_resolved)):
-            raise BidParseError("Path outside bids directory")
-        check_path = resolved_path
+    try:
+        check_path = resolve_inside(path, bids_dir, "bids")
+    except PathOutsideError as exc:
+        raise BidParseError(str(exc))
     
     # Check if file exists
     if not check_path.exists():
@@ -77,7 +70,7 @@ def parse_bid(path: Path, bids_dir: Path) -> Dict[str, Any]:
                 if not text:
                     raise BidParseError("Unable to extract text from PDF")
                 lines.extend(text.split('\n'))
-    except Exception as e:
+    except PyPdfError as e:
         raise BidParseError(f"Unable to extract text from PDF: {str(e)}")
     
     # Process lines and extract data
@@ -150,10 +143,10 @@ def parse_bid(path: Path, bids_dir: Path) -> Dict[str, Any]:
     arithmetic_ok = True
     
     # Check item line totals
-    for i, item in enumerate(items, 1):
+    for item in items:
         expected_total = item.quantity * item.unit_price
         if abs(expected_total - item.line_total) > 0.01:
-            issues.append(f"Line {i}: {int(item.quantity)} x {int(item.unit_price)} = {expected_total:.2f} but line total is {item.line_total:.2f}")
+            issues.append(f"Line {item.no}: {item.quantity:g} x {item.unit_price:g} = {expected_total:.2f} but line total is {item.line_total:.2f}")
             arithmetic_ok = False
     
     # Check stated total

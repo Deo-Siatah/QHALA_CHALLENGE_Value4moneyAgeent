@@ -42,11 +42,15 @@ async function detail(response: Response): Promise<string> {
   return `${response.status} ${response.statusText}`;
 }
 
-export function startRun(files: File[]): Promise<{ run_id: string; status: RunStatusish }> {
+export function startRun(
+  files: File[],
+  tender: File,
+): Promise<{ run_id: string; status: RunStatusish; tender_uploaded: boolean }> {
   const body = new FormData();
   for (const file of files) {
     body.append("files", file);
   }
+  body.append("tender", tender);
   return request("/runs", { method: "POST", body });
 }
 
@@ -72,8 +76,17 @@ export const getReportMarkdown = async (runId: string): Promise<string> => {
   return response.text();
 };
 
-export const reportUrl = (runId: string, format: "pdf" | "tex"): string =>
-  `${BASE}/runs/${runId}/report.${format}`;
+export const reportUrl = (
+  runId: string,
+  format: "html" | "pdf" | "tex",
+  options?: { orientation?: "portrait" | "landscape"; paperSize?: "A4" | "Letter" },
+): string => {
+  const query = new URLSearchParams();
+  if (options?.orientation) query.set("orientation", options.orientation);
+  if (options?.paperSize) query.set("paper_size", options.paperSize);
+  const suffix = query.toString();
+  return `${BASE}/runs/${runId}/report.${format}${suffix ? `?${suffix}` : ""}`;
+};
 
 /**
  * Subscribe to one run's events.

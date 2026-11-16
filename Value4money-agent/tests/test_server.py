@@ -6,7 +6,8 @@ from mcp.server.fastmcp.exceptions import ToolError
 from mcp_server import audit, server
 from conftest import SharedConnection
 
-TOOLS = ["parse_bid_pdf", "find_comparable_awards", "flag_data_quality", "benchmark_price",
+TOOLS = ["parse_bid_pdf", "extract_tender_pdf", "record_intake_correction",
+         "find_comparable_awards", "flag_data_quality", "benchmark_price",
          "draft_review_file", "submit_for_committee"]
 
 
@@ -15,7 +16,7 @@ def registered(mcp_server):
     return {tool.name: tool for tool in asyncio.run(mcp_server.list_tools())}
 
 
-def test_exactly_the_six_own_tools_are_registered():
+def test_exactly_the_eight_own_tools_are_registered():
     assert set(registered(server.mcp)) == set(TOOLS)
 
 

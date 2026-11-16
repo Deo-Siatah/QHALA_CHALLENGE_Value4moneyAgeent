@@ -75,6 +75,19 @@ def _line(label: str, value: Any) -> str:
 def print_paused(result: Dict[str, Any], run_id: str, draft_path: Path) -> None:
     """Show the approver what they are being asked about, and how to answer."""
     request = result["__interrupt__"][0].value
+    if request.get("gate") == "intake":
+        print(f"\n=== {run_id} is waiting for the intake to be confirmed ===")
+        print(f"  tender{'':<18} {request.get('tender_ref')}")
+        for bid in request.get("bids", []):
+            print(_line(f"bid {bid.get('bidder')}", f"{bid.get('status')} "
+                                                    f"({bid.get('confidence')} confidence)"))
+        for issue in request.get("issues", []):
+            print(f"  - {issue}")
+        print(f"\n  to confirm:\n    uv run python main.py --resume {run_id} "
+              f'--decision approved --approved-by "Your Name"')
+        print(f'  to stop:\n    uv run python main.py --resume {run_id} '
+              f'--decision rejected --approved-by "Your Name" --note "why"')
+        return
     benchmark = request["benchmark"]
     print(f"\n=== {run_id} is waiting for a decision ===")
     print(f"  tender{'':<18} {request['tender_ref']}")
@@ -104,6 +117,10 @@ def print_outcome(result: Dict[str, Any], run_id: str) -> int:
         print(_line("report id", submission["report_id"]))
         print(_line("approved by", submission["approved_by"]))
         print(_line("file", submission["file_path"]))
+        if submission.get("html_file_path"):
+            print(_line("print file", submission["html_file_path"]))
+        if submission.get("fingerprint"):
+            print(_line("fingerprint", submission["fingerprint"]))
         print(_line("submitted at", submission["submitted_at"]))
         return FILED
 
@@ -121,20 +138,31 @@ def print_outcome(result: Dict[str, Any], run_id: str) -> int:
     return NOT_FILED
 
 
+def tender_file(tender_dir: Path, name: Optional[str]) -> Optional[str]:
+    """The tender document to read, if the caller named one. Nothing is guessed from the folder."""
+    if not name:
+        return None
+    return str((Path(tender_dir) / name).resolve())
+
+
 def start(args: argparse.Namespace) -> int:
-    """Run from the bid PDFs to the approval gate, and stop there."""
+    """Run from the tender and bid PDFs to the approval gate, and stop there."""
     preflight()
+    settings.tender_dir = Path(args.tender_dir)
     paths = bid_paths(Path(args.bids_dir), args.pdfs)
+    tender = tender_file(Path(args.tender_dir), args.tender)
     run_id = args.run_id or new_run_id()
     started_at = datetime.now(timezone.utc).isoformat()
     start_trace(run_id)
 
     print(f"{run_id}: reading {len(paths)} bid file(s) from {args.bids_dir}")
+    if tender:
+        print(f"{run_id}: reading the tender from {args.tender_dir}")
     with checkpointer() as saver:
         graph = build_graph(saver)
         record_graph(graph)
         result = graph.invoke(
-            initial_state(run_id, paths, started_at),
+            initial_state(run_id, paths, started_at, tender),
             {"configurable": {"thread_id": run_id}})
 
     if "__interrupt__" in result:
@@ -148,7 +176,8 @@ def resume(args: argparse.Namespace) -> int:
     """Continue a paused run with a decision from a named human."""
     preflight()
     run_id = args.resume
-    decision = {"decision": args.decision, "approved_by": args.approved_by, "note": args.note or ""}
+    decision = {"decision": args.decision, "approved_by": args.approved_by, "note": args.note or "",
+                "confirmed": args.decision == "approved", "corrections": {}}
     config = {"configurable": {"thread_id": run_id}}
     start_trace(run_id)
 
@@ -183,6 +212,9 @@ def parse_args(argv: Optional[List[str]] = None,
     parser = argparse.ArgumentParser(description="Compare bid prices with past public awards.")
     parser.add_argument("--pdfs", nargs="+", help="bid PDF file names inside the bids directory")
     parser.add_argument("--bids-dir", default=str(settings.bids_dir), help="where the bid PDFs live")
+    parser.add_argument("--tender", help="tender PDF file name inside the tender directory")
+    parser.add_argument("--tender-dir", default=str(settings.tender_dir),
+                        help="where the tender PDF lives")
     parser.add_argument("--run-id", help="use this run id instead of a generated one")
     parser.add_argument("--resume", metavar="RUN_ID", help="continue a run that is waiting for a decision")
     parser.add_argument("--decision", choices=["approved", "rejected"], help="the human's decision")

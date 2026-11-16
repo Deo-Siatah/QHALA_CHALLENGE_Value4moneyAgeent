@@ -97,7 +97,7 @@ def test_pool_section_shows_statistics_search_and_exclusions():
     assert "category=works" in pool_section
     assert "min_year=2023" in pool_section
     assert "attempts=2" in pool_section
-    assert "no_value" in pool_section and "not_comparable" in pool_section
+    assert "no value" in pool_section and "not comparable" in pool_section
 
 
 def test_bid_table_rows():
@@ -106,8 +106,8 @@ def test_bid_table_rows():
 
     assert "Apex" in bids_section and "Bora" in bids_section
     assert "3,000,000.00" in bids_section and "5,000,000.00" in bids_section
-    assert "0.0%" in bids_section and "66.7%" in bids_section
-    assert "within_range" in bids_section and "far_above" in bids_section
+    assert "on the median" in bids_section and "67% above" in bids_section
+    assert "within the normal range" in bids_section and "far above the upper quartile" in bids_section
     assert "unit price line missing" in bids_section
     assert "Sits on the median of six awards." in bids_section
 

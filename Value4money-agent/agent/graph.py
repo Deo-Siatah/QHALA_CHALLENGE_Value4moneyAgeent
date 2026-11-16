@@ -1,9 +1,13 @@
-# Wire the eight nodes into one run and decide where each step leads next.
+# Wire the ten nodes into one run and decide where each step leads next.
 #
 # The run is a fixed line with two loops in it:
-#   START -> intake -> research -> quality_check -> score -> draft -> verify_sources -> approval -> file -> END
+#   START -> tender_intake -> bid_intake -> confirm_intake -> research -> quality_check -> score ->
+#   draft -> verify_sources -> approval -> file -> END
 #
-# intake reads the bid PDFs. research finds public past awards for the same kind of work.
+# tender_intake reads the tender document when one was supplied. bid_intake reads the bid PDFs with
+# the tolerant extractor and keeps each document's own status. confirm_intake either passes a clean
+# intake straight on or asks a named person to confirm it.
+# research finds public past awards for the same kind of work.
 # quality_check drops the unusable candidates and asks the model about the suspicious ones.
 # score places the bid totals against the cleaned pool. draft asks the model for short wording
 # and renders the committee file. verify_sources checks that every finding cites a real award.
@@ -39,7 +43,9 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from config import settings
 from agent.state import AgentState
 from agent.tracing import track_graph
-from agent.nodes.intake import intake_node
+from agent.nodes.tender_intake import tender_intake_node
+from agent.nodes.bid_intake import bid_intake_node
+from agent.nodes.confirm_intake import confirm_intake_node
 from agent.nodes.research import research_node
 from agent.nodes.quality_check import quality_check_node
 from agent.nodes.score import score_node
@@ -49,9 +55,10 @@ from agent.nodes.approval import approval_node
 from agent.nodes.file import file_node
 
 
-def route_after_intake(state: AgentState) -> Literal["research"] | Literal["__end__"]:
-    """Go to research, unless no bid could be parsed and there is nothing to compare."""
-    return "research" if state.get("bids") else END
+def route_after_confirm(state: AgentState) -> Literal["research"] | Literal["__end__"]:
+    """Go to research only when the intake was confirmed and a bid can be benchmarked."""
+    usable = any(bid.get("status") == "ok" for bid in state.get("bids") or [])
+    return "research" if state.get("intake_confirmed") and usable else END
 
 
 def route_after_quality_check(state: AgentState) -> Literal["research", "score"]:
@@ -83,14 +90,18 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
     # Nodes are registered as plain functions, not traced ones. The LangGraph tracer records every
     # node itself and is what carries the graph structure to Opik, so wrapping them here as well
     # would log each node twice.
-    for name, node in [("intake", intake_node), ("research", research_node),
+    for name, node in [("tender_intake", tender_intake_node), ("bid_intake", bid_intake_node),
+                       ("confirm_intake", confirm_intake_node), ("research", research_node),
                        ("quality_check", quality_check_node), ("score", score_node),
                        ("draft", draft_node), ("verify_sources", verify_sources_node),
                        ("approval", approval_node), ("file", file_node)]:
         builder.add_node(name, node)
 
-    builder.add_edge(START, "intake")
-    builder.add_conditional_edges("intake", route_after_intake, {"research": "research", END: END})
+    builder.add_edge(START, "tender_intake")
+    builder.add_edge("tender_intake", "bid_intake")
+    builder.add_edge("bid_intake", "confirm_intake")
+    builder.add_conditional_edges("confirm_intake", route_after_confirm,
+                                  {"research": "research", END: END})
     builder.add_edge("research", "quality_check")
     builder.add_conditional_edges("quality_check", route_after_quality_check,
                                   {"research": "research", "score": "score"})

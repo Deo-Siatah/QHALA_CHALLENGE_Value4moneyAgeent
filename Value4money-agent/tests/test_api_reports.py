@@ -94,7 +94,7 @@ def test_the_same_figures_are_in_all_three_forms():
     pdf = pdf_text(render_pdf(one))
 
     for figure in ["17", "2,839,845.72", "1,898,942.00", "4,021,089.00",
-                   "2,478,800.00", "5,188,200.00", "82.8%", "different_work (10)"]:
+                   "2,478,800.00", "5,188,200.00", "83% above", "different work (10)"]:
         assert figure in markdown, f"{figure} is missing from the markdown"
         assert figure in tex, f"{figure} is missing from the LaTeX"
         assert figure in pdf or figure.replace(",", "") in pdf, f"{figure} is missing from the PDF"
@@ -163,16 +163,21 @@ def test_the_renderers_refuse_a_review_the_tool_would_refuse():
 def test_the_review_is_rebuilt_from_the_state_the_run_already_holds():
     """The LaTeX and the PDF are built from the dict draft_review_file validated, not from a second
     guess at what the report says."""
-    state = {"run_id": "run-1", "tender_ref": "T/1", "summary": "Twelve awards were compared.",
-             "bid_comments": {"Apex": "4.2% above the median."},
+    state = {"run_id": "run-1", "tender_ref": "T/1",
+             "summary_note": "The awards cover similar classroom work.",
+             "finding_notes": {"pool": "The awards cover similar classroom work."},
+             "report_degraded": False,
              "benchmark": {"n": 12, "confidence": "medium", "median_kes": 4000000.0,
                            "q1_kes": 3000000.0, "q3_kes": 5000000.0,
                            "bids": [{"bidder": "Apex", "total": 4000000.0,
                                      "pct_vs_median": 4.2, "position": "within_range"}]},
              "bids": [{"bidder": "Apex", "stated_total": 4000000.0, "items": [],
-                       "computed_total": 4000000.0, "arithmetic_ok": True, "issues": []}],
+                       "computed_total": 4000000.0, "arithmetic_ok": True, "issues": [], "status": "ok"}],
              "search": {"match": "loose"}, "excluded": {"different_work": 2},
-             "findings": [{"text": "One bid is 4.2% above the median.", "sources": ["a01"]}],
+             "findings": [{"key": "pool", "kind": "pool",
+                           "text": "One bid is 4% above the median.",
+                           "sources": [{"kind": "pool", "award_id": "a01"}],
+                           "note": "The awards cover similar classroom work."}],
              "sources": [{"award_id": "a01", "ocid": "ocid-a01", "data_year": 2024,
                           "buyer_name": "County", "title": "Classroom block",
                           "value_kes": 4000000.0}],
@@ -180,8 +185,8 @@ def test_the_review_is_rebuilt_from_the_state_the_run_already_holds():
 
     built = review_from_state(state)
 
-    assert built["summary"] == "Twelve awards were compared."
-    assert built["bids"][0]["comment"] == "4.2% above the median."
+    assert built["summary"] == "The awards cover similar classroom work."
+    assert built["findings"][0]["text"] == "One bid is 4% above the median."
     assert [source["award_id"] for source in built["sources"]] == ["a01"]
     assert render_review(built)["markdown"].startswith("# Price review evidence: T/1")
     assert "4,000,000.00" in render_tex(built)

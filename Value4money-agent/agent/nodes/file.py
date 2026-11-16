@@ -1,4 +1,4 @@
-# File the approved report. The last node, and the only one that changes anything outside this run.
+﻿# File the approved report. The last node, and the only one that changes anything outside this run.
 #
 # What this node does, in order:
 #  1. It checks that a named human actually approved. approval_status must be approved, and the
@@ -17,6 +17,7 @@
 # What it returns: the tool's record of the filing, or the reason it did not happen.
 
 from mcp_server.tools.submit_for_committee import PLACEHOLDERS, SubmitError
+from mcp_server.tools.report_model import ReportModel, build_report_model
 from agent.state import AgentState
 from agent.tools import submit_for_committee
 from config import settings
@@ -41,8 +42,16 @@ def _approver(state: AgentState) -> str:
 def file_node(state: AgentState) -> dict:
     """Submit the approved report, or record why it could not be submitted."""
     approved_by = _approver(state)
+    review = {"run_id": state["run_id"], "tender_ref": state.get("tender_ref"),
+              "benchmark": state.get("benchmark") or {},
+              "summary_note": state.get("summary_note"),
+              "report_degraded": state.get("report_degraded", False)}
+    carried_model = state.get("report_model")
+    review_json = (build_report_model(review, state).model_dump(mode="json")
+                   if not isinstance(carried_model, dict) else ReportModel(**carried_model).model_dump(mode="json"))
     try:
-        submission = submit_for_committee(state["run_id"], state["review_markdown"], approved_by)
+        submission = submit_for_committee(state["run_id"], state["review_markdown"], approved_by,
+                                          review_json=review_json)
     except SubmitError as exc:
         return {"errors": [f"submit_for_committee refused the report: {exc}"]}
     return {"submission": submission}

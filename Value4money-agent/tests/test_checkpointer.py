@@ -54,7 +54,9 @@ def url_for(name):
 
 def _faked(monkeypatch):
     """Fake every node except approval, so the run stops at the human decision."""
-    monkeypatch.setattr(graph, "intake_node", lambda s: {"bids": [{"bidder": "Apex"}]})
+    monkeypatch.setattr(graph, "tender_intake_node", lambda s: {"tender_fields": {}})
+    monkeypatch.setattr(graph, "bid_intake_node", lambda s: {"bids": [{"bidder": "Apex", "status": "ok"}], "tender_ref": "T/1"})
+    monkeypatch.setattr(graph, "confirm_intake_node", lambda s: {"intake_confirmed": True})
     monkeypatch.setattr(graph, "research_node",
                         lambda s: {"search_attempts": 1, "search": {"match": "strict"}})
     monkeypatch.setattr(graph, "quality_check_node", lambda s: {"pool_size": 12})

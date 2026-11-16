@@ -1,6 +1,11 @@
+import hashlib
+
 import pytest
 from pathlib import Path
 
+from mcp_server.tools.report_html import render_html
+from mcp_server.tools.report_markdown import render_markdown
+from mcp_server.tools.report_model import ReportModel
 from mcp_server.tools.submit_for_committee import submit_report, submit_for_committee, SubmitError
 
 REPORT = "# Price review evidence: TENDER/NC/2026/014\n\nEvidence for committee review.\n"
@@ -80,6 +85,27 @@ def test_failed_file_write_rolls_back_the_row(reports_conn, tmp_path, monkeypatc
         submit_report(reports_conn, tmp_path, "run-1", REPORT, "Grace Wanjiku")
 
     assert rows(reports_conn, "run-1") == []
+
+
+def test_the_tool_computes_the_fingerprint_from_the_body_it_stores(reports_conn, tmp_path):
+    result = submit_report(reports_conn, tmp_path, "run-1", REPORT, "Grace Wanjiku")
+
+    saved = rows(reports_conn, "run-1")[0]
+    assert saved["fingerprint"] == hashlib.sha256(REPORT.encode("utf-8")).hexdigest()
+    assert result["fingerprint"] == saved["fingerprint"]
+
+
+def test_review_json_is_stored_and_re_renders_the_same_html(reports_conn, tmp_path, report_model):
+    body = render_markdown(report_model)
+    review_json = report_model.model_dump(mode="json")
+
+    submit_report(reports_conn, tmp_path, "run-1", body, "Grace Wanjiku", review_json=review_json)
+    saved = rows(reports_conn, "run-1")[0]
+
+    restored = ReportModel(**saved["review_json"])
+    first = render_html(report_model, fingerprint=saved["fingerprint"])
+    second = render_html(restored, fingerprint=saved["fingerprint"])
+    assert first == second
 
 
 def test_wrapper_uses_settings_outputs_dir(monkeypatch, tmp_path, reports_conn):

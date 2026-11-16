@@ -72,7 +72,7 @@ def test_a_failed_tool_call_still_leaves_a_row(rows):
 def test_find_comparable_awards_forwards_every_argument(rows, monkeypatch):
     seen = {}
 
-    def fake(query, category, buyer_id, match, min_year, exclude_ocid):
+    def fake(query, category, buyer_id, match, min_year, exclude_ocid, required_terms=None):
         seen.update({"query": query, "category": category, "buyer_id": buyer_id, "match": match,
                      "min_year": min_year, "exclude_ocid": exclude_ocid})
         return {"filters": {}, "count": 0, "candidates": []}

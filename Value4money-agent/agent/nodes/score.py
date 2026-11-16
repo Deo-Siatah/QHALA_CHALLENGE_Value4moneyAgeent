@@ -24,7 +24,7 @@ from agent.tools import benchmark_price
 
 
 def score_node(state: AgentState) -> dict:
-    """Benchmark the stated bid totals against the cleaned pool."""
+    """Benchmark the stated totals of the bids whose documents were read cleanly."""
     bids: List[Dict[str, Any]] = [{"bidder": bid["bidder"], "total": bid["stated_total"]}
-                                  for bid in state["bids"]]
+                                  for bid in state["bids"] if bid.get("status") == "ok"]
     return {"benchmark": benchmark_price(state["run_id"], bids, state.get("pool", []))}

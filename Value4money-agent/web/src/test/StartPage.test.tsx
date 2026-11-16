@@ -31,10 +31,11 @@ function pdfFile(name: string) {
   return new File([new Uint8Array(2048)], name, { type: "application/pdf" });
 }
 
-async function choose(name: string) {
-  const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+async function choose(name: string, part: "bid" | "tender" = "bid") {
+  const inputs = document.querySelectorAll('input[type="file"]');
+  const input = inputs[part === "tender" ? 1 : 0] as HTMLInputElement;
   fireEvent.change(input, { target: { files: [pdfFile(name)] } });
-  await screen.findByText(name);
+  await screen.findAllByText(name);
 }
 
 function startButton() {
@@ -68,6 +69,9 @@ describe("starting a review", () => {
     expect(startButton()).toBeDisabled();
 
     await choose("apex.pdf");
+    expect(startButton()).toBeDisabled();
+
+    await choose("tender.pdf", "tender");
 
     expect(startButton()).toBeEnabled();
   });
@@ -76,11 +80,13 @@ describe("starting a review", () => {
     renderPage();
     await choose("apex.pdf");
     await choose("bora.pdf");
+    await choose("tender.pdf", "tender");
 
     fireEvent.click(startButton());
 
     await waitFor(() => expect(startRun).toHaveBeenCalledTimes(1));
     expect(startRun.mock.calls[0][0].map((file: File) => file.name)).toEqual(["apex.pdf", "bora.pdf"]);
+    expect((startRun.mock.calls[0][1] as File).name).toBe("tender.pdf");
   });
 
   it("names the files it is about to start on, so a mis-drop is caught before the click", async () => {
@@ -108,6 +114,7 @@ describe("starting a review", () => {
     startRun.mockRejectedValue(new Error("apex.pdf is not a PDF"));
     renderPage();
     await choose("apex.pdf");
+    await choose("tender.pdf", "tender");
 
     fireEvent.click(startButton());
 

@@ -8,6 +8,7 @@ import { REPLAY, REPLAY_APPROVAL } from "../api/replay";
 import type { ApprovalRequest, Decision, RunSnapshot, Step } from "../api/types";
 import { STEPS } from "../api/types";
 import { ApprovalGate } from "../components/ApprovalGate";
+import { IntakeSummary } from "../components/IntakeSummary";
 import { ModelStream } from "../components/ModelStream";
 import { PoolBoxPlot } from "../components/PoolBoxPlot";
 import { Findings, ReportView } from "../components/ReportView";
@@ -84,9 +85,11 @@ export function RunPage() {
   };
 
   return (
-    <div className="mx-auto max-w-4xl px-5 py-8">
-      <header className="flex flex-wrap items-start justify-between gap-3">
+    <div className="mx-auto max-w-5xl px-5 py-8 sm:py-10">
+      <header className="rounded-xl border border-blue-100 bg-paper/90 px-5 py-5 shadow-soft sm:px-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
+          <p className="text-[0.7rem] font-semibold tracking-[0.16em] text-accent uppercase">Evidence review</p>
           <h1 className="text-xl font-semibold tracking-tight text-ink-900">
             {state?.tender_ref ?? "Reading the bids…"}
           </h1>
@@ -96,9 +99,18 @@ export function RunPage() {
           <StatusBadge status={status} />
           <span className="tabular-nums text-sm text-ink-500">{elapsed(view.elapsedMs)}</span>
         </div>
+        </div>
+        {state?.description && <p className="mt-4 max-w-2xl border-t border-ink-200 pt-3 text-sm text-ink-600">{state.description}</p>}
       </header>
 
-      {state?.description && <p className="mt-3 text-sm text-ink-700">{state.description}</p>}
+      {(state?.intake_issues.length ?? 0) > 0 && (
+        <div className="mt-4 rounded-md border border-ask/30 bg-ask/5 px-4 py-3">
+          <p className="text-sm font-semibold text-ask">Intake needs attention.</p>
+          <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-ink-700">
+            {state?.intake_issues.map((issue) => <li key={issue}>{issue}</li>)}
+          </ul>
+        </div>
+      )}
 
       {view.errors.length > 0 && (
         <div className="mt-4 rounded-md border border-stop/30 bg-stop/5 px-4 py-3">
@@ -154,7 +166,37 @@ function PanelBody({
   runId: string;
   status: RunSnapshot["status"] | "queued" | "running";
 }) {
-  if (step === "intake") {
+  if (step === "tender_intake") {
+    return (
+      <div className="space-y-2 text-sm">
+        <p className="text-ink-700">
+          {state?.tender?.fields && Object.keys(state.tender.fields).length > 0
+            ? "The tender's labelled fields, with the page each one came from."
+            : "No tender fields were read for this run."}
+        </p>
+        <IntakeSummary tender={state?.tender} tenderMissing={state?.tender_missing} />
+      </div>
+    );
+  }
+
+  if (step === "confirm_intake") {
+    const confirmed = state?.intake_confirmed;
+    return (
+      <div className="space-y-3 text-sm">
+        <p className="text-ink-700">
+          {confirmed === true
+            ? "The intake was confirmed. Anything a person needs to see is listed below."
+            : confirmed === false
+              ? "The intake was not confirmed. Nothing was searched."
+              : "The intake has not been confirmed yet."}
+        </p>
+        <IntakeSummary tender={state?.tender} tenderMissing={state?.tender_missing}
+          issues={state?.intake_issues} />
+      </div>
+    );
+  }
+
+  if (step === "bid_intake") {
     return (
       <div className="space-y-2 text-sm">
         {state?.bids.length ? (
@@ -261,7 +303,8 @@ function emptySnapshot(runId: string, status: RunSnapshot["status"] | "queued" |
   return {
     run_id: runId,
     status: status as RunSnapshot["status"],
-    tender_ref: null, category: null, description: null, current_step: null, elapsed_ms: 0,
+    tender_ref: null, category: null, description: null, tender: {}, tender_missing: [],
+    intake_confirmed: null, intake_issues: [], current_step: null, elapsed_ms: 0,
     steps: STEPS.map((step, index) => ({ step, index, status: "done", elapsed_ms: 0, summary: "" })),
     bids: [], benchmark: null, pool_size: 0, pool_values: [], excluded: {}, summary: "",
     bid_comments: {}, findings: [], sources: [], verify_ok: true, verify_failures: [], errors: [],

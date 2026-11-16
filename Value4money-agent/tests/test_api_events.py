@@ -111,17 +111,17 @@ def test_a_reader_can_ask_how_long_it_will_wait():
 def test_a_step_reports_when_it_starts_and_how_long_it_took():
     handler = RunEventHandler(RunEventChannel())
 
-    handler.on_chain_start({}, {"run_id": "run-1"}, run_id="node-1", name="intake")
+    handler.on_chain_start({}, {"run_id": "run-1"}, run_id="node-1", name="bid_intake")
     handler.on_chain_end({"bids": []}, run_id="node-1")
 
-    assert handler.step_started == ("intake", 0)
-    assert handler.steps[0].step == "intake"
-    assert handler.steps[0].index == 0
+    assert handler.step_started == ("bid_intake", 1)
+    assert handler.steps[0].step == "bid_intake"
+    assert handler.steps[0].index == 1
     assert handler.steps[0].elapsed_ms >= 0
 
 
 def test_a_chain_that_is_not_a_step_of_the_run_is_left_alone():
-    """LangGraph opens chains of its own around the nodes. Only the eight named steps are events."""
+    """LangGraph opens chains of its own around the nodes. Only the ten named steps are events."""
     handler = RunEventHandler(RunEventChannel())
 
     handler.on_chain_start({}, {}, run_id="graph-1", name="LangGraph")
@@ -173,7 +173,7 @@ def test_a_step_that_ends_without_having_started_is_not_reported():
 
 def test_a_step_data_payload_is_kept_only_when_it_is_a_mapping():
     handler = RunEventHandler(RunEventChannel())
-    handler.on_chain_start({}, {}, run_id="node-1", name="intake")
+    handler.on_chain_start({}, {}, run_id="node-1", name="bid_intake")
     handler.on_chain_end("not a mapping", run_id="node-1")
 
     assert handler.step_data == [None]
@@ -191,10 +191,10 @@ def test_a_callback_that_fails_does_not_break_the_run():
     handler = RunEventHandler(Broken())
     handler.raise_error = False
 
-    handler.on_chain_start({}, {}, run_id="node-1", name="intake")
+    handler.on_chain_start({}, {}, run_id="node-1", name="bid_intake")
     handler.on_chain_end({"bids": []}, run_id="node-1")
 
-    assert [record.step for record in handler.steps] == ["intake"]
+    assert [record.step for record in handler.steps] == ["bid_intake"]
     assert handler.step_data == [{"bids": []}]
 
 
@@ -204,7 +204,7 @@ def test_a_steps_elapsed_time_is_the_difference_between_its_start_and_its_end():
     ticks = iter([100.0, 112.5])
     handler = RunEventHandler(RunEventChannel(), clock=lambda: next(ticks))
 
-    handler.on_chain_start({}, {}, run_id="node-1", name="intake")
+    handler.on_chain_start({}, {}, run_id="node-1", name="bid_intake")
     handler.on_chain_end({}, run_id="node-1")
 
     assert handler.steps[0].elapsed_ms == 12500.0
@@ -224,7 +224,7 @@ def test_a_model_calls_elapsed_time_is_measured_the_same_way():
 
 def test_a_real_clock_never_reports_a_negative_time():
     handler = RunEventHandler(RunEventChannel())
-    handler.on_chain_start({}, {}, run_id="node-1", name="intake")
+    handler.on_chain_start({}, {}, run_id="node-1", name="bid_intake")
     handler.on_chain_end({}, run_id="node-1")
 
     assert handler.steps[0].elapsed_ms >= 0

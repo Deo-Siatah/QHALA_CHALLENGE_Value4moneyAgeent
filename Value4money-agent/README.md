@@ -163,6 +163,8 @@ All sample bids are synthetic. Every page says so.
 |---|---|
 | `--bids-dir PATH` | read bid PDFs from this folder (default `sample_bids`) |
 | `--pdfs NAME [NAME...]` | read only these PDFs from the folder |
+| `--tender NAME` | read one tender document from `--tender-dir` as well |
+| `--tender-dir PATH` | read tender documents from this folder (default `sample_tenders`) |
 | `--run-id ID` | use your own run id instead of a timestamped one |
 | `--no-colour` | plain output, no colour |
 
@@ -204,10 +206,12 @@ npm run dev                      # http://localhost:5173
 To see the run page without starting a real run, open
 `http://localhost:5173/runs/anything?replay=1` — it plays a recorded sequence of real events.
 
-**How it behaves.** Choosing the bid PDFs never starts anything: the files are staged by name, can be
-removed, and a run only begins when **Start Analysis** is pressed. While Hasibu works, the run page is
+**How it behaves.** The landing page explains the three-stage job: read the documents, compare public
+awards, and prepare evidence for human approval. Choosing the tender and bid PDFs never starts
+anything: the files are staged by name, can be removed, and a run only begins when **Start Analysis**
+is pressed. While Hasibu works, the run page is
 a **single focal slot**, not a stack of cards: a numbered badge names the step that is happening now
-(`Step 3 of 8`), the model's words and the step's detail stream live inside it, and on completion the
+(`Step 3 of 10`), the model's words and the step's detail stream live inside it, and on completion the
 badge turns into a green tick before the same slot is handed to the next step. Once the pipeline
 pauses for a person (or finishes), that slot unfolds into a **vertical overview** — every step with
 its tick and one-line summary, each one expandable to inspect its citations, benchmark and pool. State
@@ -216,21 +220,25 @@ and in print.
 
 **The token never reaches the browser.** `EventSource` cannot set request headers, and a token in the
 page would ship in the client bundle. In development Vite's proxy adds the `X-API-Token` header on the
-way past; in production `web/api/[...path].ts` does the same on Vercel, forwarding `/api/*` to the
+way past; in production `web/api/proxy.ts` does the same on Vercel, forwarding `/api/*` to the
 backend server-to-server. See [`web/README.md`](web/README.md) for the interface and its deployment in
-full.
+full. The report toolbar opens the generated PDF for printing or download and supports A4 or Letter
+paper in portrait or landscape orientation.
 
 ---
 
 ## How it works
 
 ```
-intake → research → quality_check → score → draft → verify_sources → approval → file
+tender_intake → bid_intake → confirm_intake → research → quality_check → score → draft
+              → verify_sources → approval → file
 ```
 
 | Node | What it does |
 |---|---|
-| `intake` | parses each bid PDF and checks the line items against the stated total |
+| `tender_intake` | reads the tender document's labelled fields, keeping each value's page and line; missing fields are listed, never filled in |
+| `bid_intake` | reads every bid PDF, records each document's status and confidence, and checks the line items against the stated total |
+| `confirm_intake` | pauses for a named person when a bid is a scan or the tender has missing fields; web uploads record the issues and continue |
 | `research` | searches past awards, widening the search if the pool is thin (max 3 tries) |
 | `quality_check` | drops unusable awards by rule — no value, wrong currency, duplicate, and **scale mismatch**: more than `MAX_SCALE_RATIO` above or below the median bid total. The model then judges only what rules cannot |
 | `score` | benchmarks every bid against the pool, or reports `insufficient` if the pool is too thin |
@@ -266,7 +274,7 @@ api/                     the HTTP API the web interface talks to
 web/                     the React interface, and its Vercel deployment config
 agent/
   cli.py                the terminal front end: banner, live steps, approval, report
-  graph.py              the eight nodes and their edges
+  graph.py              the ten nodes and their edges
   state.py              AgentState and its reducers
   llm.py                model wrapper: streaming, retries, one place to configure
   tools.py              audited wrappers around every tool

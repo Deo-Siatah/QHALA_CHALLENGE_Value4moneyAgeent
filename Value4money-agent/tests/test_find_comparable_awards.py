@@ -273,3 +273,48 @@ def test_hostile_query_handled(mock_connect):
     assert "filters" in result
     assert "count" in result
     assert "candidates" in result
+
+@patch('psycopg.connect')
+def test_required_core_terms_are_prefix_matched_in_strict_and_loose(mock_connect):
+    """Core terms narrow the pool even when the rest of the query widens."""
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    mock_cursor.fetchall.return_value = []
+
+    for mode in ("strict", "loose"):
+        search_awards(mock_conn, "construction", match=mode, required_terms=["classroom"])
+
+        sql_text, params = mock_cursor.execute.call_args[0]
+        assert "to_tsquery" in sql_text
+        assert "classroom:*" in params
+        assert mock_cursor.execute.call_args[0][0].count("to_tsquery") >= 2
+
+
+@patch('psycopg.connect')
+def test_required_core_terms_are_an_ilike_filter_in_fuzzy(mock_connect):
+    """Fuzzy matching still keeps the core term, so a misspelling cannot change the work."""
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    mock_cursor.fetchall.return_value = []
+
+    search_awards(mock_conn, "clasroom", match="fuzzy", required_terms=["classroom"])
+
+    sql_text, params = mock_cursor.execute.call_args[0]
+    assert "LIKE" in sql_text
+    assert "classroom%" in params
+
+
+@patch('psycopg.connect')
+def test_required_core_terms_are_echoed_in_the_filters(mock_connect):
+    """The report can say which core terms held the pool to the same kind of work."""
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    mock_cursor.fetchall.return_value = []
+
+    result = search_awards(mock_conn, "construction", match="strict",
+                           required_terms=["classroom", "block"])
+
+    assert result["filters"]["required_terms"] == ["classroom", "block"]

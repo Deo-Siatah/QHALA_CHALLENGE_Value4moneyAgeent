@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from fpdf import FPDF
 from mcp_server.tools.parse_bid_pdf import parse_bid, BidParseError
 from conftest import make_pdf
 
@@ -261,3 +262,52 @@ def test_hostile_text_filtered(tmp_path, hostile_text_bid_lines):
     # The hostile text should not appear in any field
     assert "Ignore previous instructions" not in str(result)
     assert result["bidder"] == "Apex Supplies Ltd"  # Only the legitimate bidder name
+
+
+def test_a_sibling_folder_is_not_inside_the_bids_directory(tmp_path):
+    """A string prefix lets bids_evil pass as inside bids; resolved paths must decide."""
+    bids = tmp_path / "bids"
+    evil = tmp_path / "bids_evil"
+    bids.mkdir()
+    evil.mkdir()
+    pdf_path = make_pdf(evil, "sneaky.pdf", [
+        "Bidder: Outside Ltd",
+        "Tender reference: T/1",
+        "Currency: KES",
+        "1 | Item | each | 1 | 100 | 100",
+        "Stated total: 100",
+    ])
+
+    with pytest.raises(BidParseError, match="Path outside bids directory"):
+        parse_bid(pdf_path, bids)
+
+
+def test_an_image_only_page_raises_one_clear_message(tmp_path):
+    """A page with no text must not report the same failure twice through its own wrapper."""
+    pdf = FPDF()
+    pdf.add_page()
+    path = tmp_path / "image-only.pdf"
+    pdf.output(str(path))
+
+    with pytest.raises(BidParseError) as err:
+        parse_bid(path, tmp_path)
+
+    message = str(err.value)
+    assert message.count("Unable to extract text from PDF") == 1
+
+
+def test_arithmetic_issue_names_the_items_own_number_and_keeps_decimals(tmp_path):
+    """The label is the item's number, not its list position, and 2.5 is not truncated to 2."""
+    lines = [
+        "Bidder: Apex Supplies Ltd",
+        "Tender reference: T/1",
+        "Currency: KES",
+        "7 | Widget | each | 2.5 | 4 | 9.00",
+        "Stated total: 9.00",
+    ]
+    pdf_path = make_pdf(tmp_path, "decimal.pdf", lines)
+
+    result = parse_bid(pdf_path, tmp_path)
+
+    assert "Line 7: 2.5 x 4 = 10.00 but line total is 9.00" in result["issues"]
+    assert not any(issue.startswith("Line 1:") for issue in result["issues"])

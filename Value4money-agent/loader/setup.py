@@ -1,4 +1,4 @@
-# Bring an empty Postgres database up to the point where the agent can run, in one command.
+﻿# Bring an empty Postgres database up to the point where the agent can run, in one command.
 #
 #   uv run python -m loader.setup
 #
@@ -19,6 +19,7 @@ from config import settings
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = ROOT / "sql" / "01_schema.sql"
 INDEXES_PATH = ROOT / "sql" / "02_indexes.sql"
+REPORT_COLUMNS_PATH = ROOT / "sql" / "03_report_columns.sql"
 SLICE_PATH = ROOT / "sql" / "demo_data.sql"
 
 
@@ -58,10 +59,13 @@ def report_connection(conn: Any, emit: Callable[[str], None] = say) -> None:
 
 
 def apply_schema(conn: Any, schema_sql: str, indexes_sql: str,
-                 emit: Callable[[str], None] = say) -> None:
-    """Apply the tables first, then the indexes, which is the order they depend on."""
+                 report_sql: str = "", emit: Callable[[str], None] = say) -> None:
+    """Apply the tables, the report columns and then the indexes, in dependency order."""
     emit("creating the schema")
     conn.execute(schema_sql)
+    if report_sql:
+        emit("adding the report columns")
+        conn.execute(report_sql)
     emit("creating the indexes")
     conn.execute(indexes_sql)
     conn.commit()
@@ -133,7 +137,8 @@ def main(argv: List[str] = None) -> int:
         conn = connect(url)
         try:
             report_connection(conn)
-            apply_schema(conn, read_sql(SCHEMA_PATH), read_sql(INDEXES_PATH))
+            apply_schema(conn, read_sql(SCHEMA_PATH), read_sql(INDEXES_PATH),
+                         read_sql(REPORT_COLUMNS_PATH))
             apply_demo_slice(conn, read_sql(SLICE_PATH))
             audit_health(conn)
             say("")

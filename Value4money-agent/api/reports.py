@@ -25,6 +25,8 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from agent.nodes.draft import build_review
 from mcp_server.tools.draft_review_file import (LIMITATIONS, NOTICE, NOT_ENOUGH, _kes, _pool_lines,
                                                  render_review)
+from mcp_server.tools.report_format import pct_phrase, position_label, source_label
+from mcp_server.tools.report_model import NOT_STATED, ReportModel
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 
@@ -64,15 +66,11 @@ def tex_escape(text: Any) -> str:
 def review_from_state(state: Dict[str, Any]) -> Dict[str, Any]:
     """Rebuild the review dict the draft node assembled, from the state the run already holds.
 
-    The wording is stored on the run: summary, one comment per bidder, the findings and the sources
-    they cite. Reassembling it with the agent's own builder means the LaTeX and the PDF are built from
-    exactly the dict draft_review_file validated, rather than from a second guess at what the report
-    says.
+    The wording is stored on the run: the summary note, the findings with their notes and typed
+    sources, and every pooled source. Reassembling it with the agent's own builder means the LaTeX and
+    the PDF are built from exactly the dict draft_review_file validated.
     """
-    answer = {"summary": state.get("summary", ""),
-              "bid_comments": state.get("bid_comments") or {},
-              "findings": state.get("findings") or []}
-    return build_review(state, answer, list(state.get("sources") or []))
+    return build_review(state)
 
 
 def build_view(review: Dict[str, Any]) -> Dict[str, Any]:
@@ -93,8 +91,8 @@ def build_view(review: Dict[str, Any]) -> Dict[str, Any]:
         bids.append({
             "bidder": note["bidder"],
             "total": _kes(row["total"]) if row.get("total") is not None else "n/a",
-            "pct": "n/a" if position is None else f"{row['pct_vs_median']}%",
-            "position": "n/a" if position is None else str(position),
+            "pct": "n/a" if position is None else pct_phrase(row.get("pct_vs_median")),
+            "position": "n/a" if position is None else position_label(str(position)),
             "comment": "; ".join(list(note.get("arithmetic_issues") or [])
                                  + ([note["comment"]] if note.get("comment") else [])) or "-",
         })
@@ -111,7 +109,8 @@ def build_view(review: Dict[str, Any]) -> Dict[str, Any]:
         "not_enough": NOT_ENOUGH,
         "bids": bids,
         "findings": [{"text": finding.get("text", ""),
-                      "sources": ", ".join(finding.get("sources") or [])}
+                      "sources": ", ".join(source_label(source)
+                                           for source in finding.get("sources") or [])}
                      for finding in review.get("findings") or []],
         "limitations": list(LIMITATIONS),
         "sources": [{"award_id": source.get("award_id", ""), "ocid": source.get("ocid") or "-",
@@ -217,6 +216,104 @@ def render_pdf(review: Dict[str, Any]) -> bytes:
             source["title"], source["value_kes"]] for source in view["sources"]])
     if view["dataset"]:
         line(view["dataset"], style="I")
+
+    return bytes(pdf.output())
+
+
+def render_report_pdf(model: ReportModel, orientation: str = "landscape",
+                      paper_size: str = "A4") -> bytes:
+    """Render the current structured report model with the requested page settings."""
+    if orientation not in {"portrait", "landscape"}:
+        raise ValueError("orientation must be 'portrait' or 'landscape'")
+    if paper_size not in {"A4", "Letter"}:
+        raise ValueError("paper_size must be 'A4' or 'Letter'")
+
+    pdf = FPDF(orientation=orientation, unit="mm", format=paper_size)
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_margins(15, 15, 15)
+    pdf.add_page()
+    width_ratio = pdf.epw / 267
+
+    def heading(text: str) -> None:
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, text=ascii_safe(text), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 9)
+
+    def line(text: str, style: str = "") -> None:
+        pdf.set_font("Helvetica", style, 9)
+        pdf.multi_cell(0, 5, ascii_safe(text), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 9)
+
+    def table(headings: List[str], widths: List[float], rows: List[List[str]]) -> None:
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_fill_color(238, 238, 238)
+        for label, width in zip(headings, widths):
+            pdf.cell(width, 6, text=ascii_safe(label), border=1, fill=True)
+        pdf.ln()
+        pdf.set_font("Helvetica", "", 8)
+        for row in rows:
+            height = max(6, max((5 * (1 + len(ascii_safe(str(cell))) // max(1, int(width / 1.9)))
+                                 for cell, width in zip(row, widths)), default=6))
+            if pdf.get_y() + height > 180:
+                pdf.add_page()
+            top = pdf.get_y()
+            pdf.set_xy(pdf.l_margin, top)
+            for cell, width in zip(row, widths):
+                pdf.cell(width, height, text=ascii_safe(str(cell)), border=1, align="L")
+            pdf.ln()
+
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, text=ascii_safe(f"Price review evidence: {model.tender_ref}"),
+             new_x="LMARGIN", new_y="NEXT")
+    line(f"Prepared: {model.prepared_date}")
+    line(f"Run ID: {model.run_id}")
+    line(model.notice, style="I")
+
+    heading("Bottom line")
+    line(model.bottom_line)
+    line(f"Usual price: {model.usual_price}")
+    line(f"Normal range: {model.normal_range}")
+    line(f"Evidence: {model.evidence_strength}")
+
+    heading("Bids")
+    table(["#", "Bidder", "Total", "Usual price comparison", "State", "What to check"],
+          [width_ratio * width for width in [12, 55, 35, 40, 40, 93]],
+          [[str(bid.number), bid.bidder, bid.total_text, bid.comparison, bid.state_label,
+            " ".join(bid.check_texts)] for bid in model.bids])
+
+    heading("What this table does not show")
+    for item in model.caution_lines:
+        line(f"- {item}")
+
+    heading("Method")
+    for item in model.method_points:
+        line(f"- {item}")
+    heading("Assistant note")
+    line(model.assistant_note or "No assistant note was recorded.")
+
+    heading("Arithmetic and set-asides")
+    for bid in model.bids:
+        if bid.readable and bid.check_texts and any("stated total" in check.lower()
+                                                   for check in bid.check_texts):
+            line(f"- {bid.bidder}: {' '.join(bid.check_texts)}")
+    if not any(bid.readable and any("stated total" in check.lower() for check in bid.check_texts)
+               for bid in model.bids):
+        line("- No stated total disagreed with its line items.")
+    for row in model.set_asides:
+        line(f"- {row.award_id}: {row.title or NOT_STATED} ({row.reason_label})")
+
+    heading("Annex: comparable awards")
+    table(["Award", "Title", "Buyer", "Year", "Value (KES)"],
+          [width_ratio * width for width in [42, 75, 58, 20, 40]],
+          [[row.award_id, row.title or "Not stated", row.buyer_name or "Not stated",
+            row.data_year if row.data_year is not None else "-", row.value_text]
+           for row in model.annex_pool])
+    if not model.annex_pool:
+        line("No comparable award was found.")
+
+    heading("Glossary")
+    for term, meaning in model.glossary:
+        line(f"{term}: {meaning}")
 
     return bytes(pdf.output())
 

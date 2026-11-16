@@ -52,7 +52,8 @@ def checkpointer(conn_string: Optional[str] = None) -> Iterator[PostgresSaver]:
     """Yield a PostgresSaver backed by a small pool, setting its tables up and closing it after."""
     url = _url(conn_string)
     init_checkpoints(url)
-    pool = ConnectionPool(url, min_size=1, max_size=settings.db_pool_size, open=True)
+    pool = ConnectionPool(url, min_size=1, max_size=settings.db_pool_size,
+                          check=ConnectionPool.check_connection, open=True)
     try:
         yield PostgresSaver(pool)
     finally:
@@ -78,7 +79,8 @@ def shared_saver(conn_string: Optional[str] = None) -> PostgresSaver:
         return _shared_saver
     url = _url(conn_string)
     init_checkpoints(url)
-    _shared_pool = ConnectionPool(url, min_size=1, max_size=settings.db_pool_size, open=True)
+    _shared_pool = ConnectionPool(url, min_size=1, max_size=settings.db_pool_size,
+                                  check=ConnectionPool.check_connection, open=True)
     _shared_saver = PostgresSaver(_shared_pool)
     return _shared_saver
 

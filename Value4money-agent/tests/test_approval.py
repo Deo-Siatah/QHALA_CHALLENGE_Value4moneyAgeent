@@ -43,7 +43,9 @@ def test_a_report_is_needed_before_a_human_is_asked():
 
 def _faked(monkeypatch):
     """Fake every node except approval, up to a clean verified report."""
-    monkeypatch.setattr(graph, "intake_node", lambda s: {"bids": [{"bidder": "Apex"}]})
+    monkeypatch.setattr(graph, "tender_intake_node", lambda s: {"tender_fields": {}})
+    monkeypatch.setattr(graph, "bid_intake_node", lambda s: {"bids": [{"bidder": "Apex", "status": "ok"}], "tender_ref": "T/1"})
+    monkeypatch.setattr(graph, "confirm_intake_node", lambda s: {"intake_confirmed": True})
     monkeypatch.setattr(graph, "research_node", lambda s: {"search_attempts": 1, "search": {}})
     monkeypatch.setattr(graph, "quality_check_node", lambda s: {"pool_size": 12})
     monkeypatch.setattr(graph, "score_node", lambda s: {"benchmark": {"n": 12, "confidence": "medium"}})

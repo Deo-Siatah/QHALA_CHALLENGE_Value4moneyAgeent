@@ -35,8 +35,8 @@ from agent.nodes.approval import PUBLISH_ANYWAY
 from agent.state import initial_state
 from agent.tracing import flush, init_tracing, start_trace, traced
 
-STEP_NAMES = ["intake", "research", "quality_check", "score", "draft", "verify_sources",
-              "approval", "file"]
+STEP_NAMES = ["tender_intake", "bid_intake", "confirm_intake", "research", "quality_check",
+              "score", "draft", "verify_sources", "approval", "file"]
 
 TITLE = "Value4money · evidence for a tender committee"
 
@@ -117,8 +117,17 @@ def tender_line(console: Console, update: Dict[str, Any]) -> None:
 
 def summarise(name: str, update: Dict[str, Any]) -> str:
     """One fact about what a node just did, read from what that node returned."""
-    if name == "intake":
+    if name == "tender_intake":
+        fields = update.get("tender_fields") or {}
+        if not fields:
+            return "no tender supplied"
+        missing = len(update.get("tender_missing") or [])
+        return f"tender read · {len(fields)} fields" + (f" · {missing} missing" if missing else "")
+    if name == "bid_intake":
         return f"{len(update.get('bids', []))} bids read"
+    if name == "confirm_intake":
+        issues = update.get("intake_issues") or []
+        return "intake confirmed" if not issues else f"needs a person · {len(issues)} issues"
     if name == "research":
         return f"{len(update.get('candidates', []))} candidates"
     if name == "quality_check":
@@ -244,6 +253,34 @@ def ask_decision(console: Console, has_evidence: bool = True) -> Dict[str, str]:
         return decision_payload
 
 
+def intake_panel(console: Console, request: Dict[str, Any]) -> None:
+    """Show what was read and why a person is being asked to confirm it."""
+    body = Text()
+    body.append(f"tender {request.get('tender_ref') or 'not supplied'}\n\n")
+    for bid in request.get("bids", []):
+        body.append(f"  {bid.get('bidder') or 'unknown':<28} {bid.get('status')} "
+                    f"({bid.get('confidence')} confidence)\n")
+    if request.get("issues"):
+        body.append("\nwhat needs a person\n")
+        for issue in request["issues"]:
+            body.append(f"  - {issue}\n")
+    console.print(Panel(body, title="confirm what was read", border_style="yellow", padding=(1, 2)))
+
+
+def ask_intake(console: Console) -> Dict[str, Any]:
+    """Ask for a confirmation, in the same 'a Name' / 'r Name' form as the approval gate."""
+    console.print("\n  [bold]Confirm the intake and your name[/bold] "
+                  "[dim](a Your Name, or r Your Name to stop)[/dim]")
+    while True:
+        try:
+            decision, name = parse_decision(input("  > "))
+        except ValueError as exc:
+            console.print(f"  [red]{exc}[/red]")
+            continue
+        return {"decision": decision, "confirmed": decision == "approved",
+                "approved_by": name, "note": "", "corrections": {}}
+
+
 def filed_panel(console: Console, result: Dict[str, Any], run_id: str) -> None:
     """Say exactly what was written, and by whom."""
     submission = result.get("submission")
@@ -256,7 +293,11 @@ def filed_panel(console: Console, result: Dict[str, Any], run_id: str) -> None:
     body.append(f"report id     {submission['report_id']}\n")
     body.append(f"approved by   {submission['approved_by']}\n")
     body.append(f"filed at      {submission['submitted_at']}\n")
-    body.append(f"written to    {submission['file_path']}")
+    body.append(f"written to    {submission['file_path']}\n")
+    if submission.get("html_file_path"):
+        body.append(f"print file    {submission['html_file_path']}\n")
+    if submission.get("fingerprint"):
+        body.append(f"fingerprint   {submission['fingerprint']}")
     console.print(Panel(body, title=f"{run_id} · filed", border_style="green", padding=(1, 2)))
 
 
@@ -288,7 +329,7 @@ def run_live(console: Console, graph: Any, state: Dict[str, Any], config: Dict[s
             step(console, STEP_NAMES.index(name) + 1 if name in STEP_NAMES else 0, name,
                  now - previous, update)
             previous = now
-            if name == "intake":
+            if name == "bid_intake":
                 tender_line(console, update)
     return None
 
@@ -384,9 +425,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         def work() -> Dict[str, Any]:
             """The part of the run that belongs in the root span, up to and including filing."""
             start_trace(run_id)
-            request = run_live(console, graph, initial_state(run_id, paths, started_at), config, tokens)
+            tender = None
+            if args.tender:
+                settings.tender_dir = Path(args.tender_dir)
+                tender = str((Path(args.tender_dir) / args.tender).resolve())
+            request = run_live(console, graph,
+                               initial_state(run_id, paths, started_at, tender), config, tokens)
             if request is None:
                 return {}
+            if request.get("gate") == "intake":
+                intake_panel(console, request)
+                decision = ask_intake(console)
+                console.print(f"\n  [dim]{decision['approved_by']} "
+                              f"{'confirmed' if decision['confirmed'] else 'stopped'} the intake"
+                              f"[/dim]\n")
+                return graph.invoke(Command(resume=decision), config)
             approval_panel(console, request)
             evidence = request.get("evidence_status") != "no_evidence"
             decision = ask_decision(console, has_evidence=evidence)

@@ -18,8 +18,12 @@ def faked(monkeypatch, tmp_path):
     import agent.graph as graph_module
     from agent.nodes.approval import approval_node
 
-    monkeypatch.setattr(graph_module, "intake_node",
-                        lambda s: {"bids": [{"bidder": "Apex", "stated_total": 3150000.0}]})
+    monkeypatch.setattr(graph_module, "tender_intake_node", lambda s: {"tender_fields": {}})
+    monkeypatch.setattr(graph_module, "bid_intake_node",
+                        lambda s: {"bids": [{"bidder": "Apex", "status": "ok",
+                                             "stated_total": 3150000.0}],
+                                   "tender_ref": "T/1"})
+    monkeypatch.setattr(graph_module, "confirm_intake_node", lambda s: {"intake_confirmed": True})
     monkeypatch.setattr(graph_module, "research_node",
                         lambda s: {"search_attempts": 1, "search": {"match": "loose"}})
     monkeypatch.setattr(graph_module, "quality_check_node", lambda s: {"pool_size": 12})

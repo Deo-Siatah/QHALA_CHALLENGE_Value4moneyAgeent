@@ -447,3 +447,49 @@ def test_a_run_with_no_bids_at_all_keeps_its_whole_pool(monkeypatch):
 
     assert pool_ids(result) == ["a01", "a02"]
     assert "scale_mismatch" not in result["excluded"]
+
+
+def test_each_excluded_award_keeps_the_reason_the_annex_will_print(monkeypatch):
+    answered(monkeypatch, similarity={
+        "a01": {"verdict": "same_work", "reason": "classroom blocks"},
+        "a02": {"verdict": "different_work", "reason": "pit latrines",
+                "reason_code": "different_work"}})
+
+    result = run([candidate("a01"), candidate("a02", title="Pit latrine works")])
+
+    assert result["excluded_awards"] == [{
+        "award_id": "a02", "title": "Pit latrine works", "value_kes": 4_000_000.0,
+        "reason_code": "different_work"}]
+
+
+def test_a_multi_scope_award_is_counted_as_different_work(monkeypatch):
+    answered(monkeypatch, similarity={
+        "a01": {"verdict": "same_work", "reason": "classroom blocks"},
+        "a02": {"verdict": "different_work", "reason": "classrooms and pit latrines",
+                "reason_code": "multi_scope"}})
+
+    result = run([candidate("a01"), candidate("a02")])
+
+    assert result["excluded"] == {"different_work": 1}
+
+
+def test_an_unknown_reason_code_stops_the_run(monkeypatch):
+    answered(monkeypatch, similarity={
+        "a01": {"verdict": "different_work", "reason": "not the same",
+                "reason_code": "probably_fine"}})
+
+    with pytest.raises(ValueError, match="reason_code"):
+        run([candidate("a01")])
+
+
+def test_an_excluded_suspect_is_counted_by_its_reason_code(monkeypatch):
+    answered(monkeypatch,
+             similarity=lambda p: same_work(*[a["award_id"] for a in p["awards"]]),
+             suspects={"a09": {"verdict": "exclude", "reason": "value is a typo",
+                               "reason_code": "suspected_typo"}})
+    candidates = [candidate(f"a{i:02d}", value=float(i * 1_000_000)) for i in range(1, 6)]
+    candidates.append(candidate("a09", value=400_000_000.0))
+
+    result = run(candidates)
+
+    assert result["excluded"] == {"suspected_typo": 1}

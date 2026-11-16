@@ -7,6 +7,7 @@
 import asyncio
 import io
 
+import pypdf
 import pytest
 from fastapi.testclient import TestClient
 
@@ -135,6 +136,33 @@ def test_the_pdf_download_is_a_pdf(client):
     assert response.content.startswith(b"%PDF-")
 
 
+def test_the_pdf_download_contains_the_populated_report_model(client):
+    client.post("/api/runs", files=pdf_upload(), data={"run_id": "run-pdf-content"})
+    client.runner.get("run-pdf-content").state.update(REPORTED_STATE)
+
+    response = client.get("/api/runs/run-pdf-content/report.pdf")
+    text = "\n".join(page.extract_text() or "" for page in
+                      pypdf.PdfReader(io.BytesIO(response.content)).pages)
+
+    assert "Apex" in text
+    assert "4,000,000.00" in text
+    assert "Bottom line" in text
+    assert "Annex: comparable awards" in text
+
+
+def test_the_pdf_download_accepts_portrait_and_letter_options(client):
+    client.post("/api/runs", files=pdf_upload(), data={"run_id": "run-pdf-options"})
+    client.runner.get("run-pdf-options").state.update(REPORTED_STATE)
+
+    response = client.get("/api/runs/run-pdf-options/report.pdf",
+                          params={"orientation": "portrait", "paper_size": "Letter"})
+    page = pypdf.PdfReader(io.BytesIO(response.content)).pages[0]
+
+    assert response.status_code == 200
+    assert float(page.mediabox.height) > float(page.mediabox.width)
+    assert float(page.mediabox.width) == pytest.approx(612, abs=1)
+
+
 def test_the_downloads_are_gated_by_the_token_like_everything_else(client):
     client.post("/api/runs", files=pdf_upload(), data={"run_id": "run-locked"})
     client.runner.get("run-locked").state.update(REPORTED_STATE)
@@ -188,6 +216,17 @@ def test_uploading_bids_starts_a_run_that_goes_on_to_the_gate(client):
     assert client.get("/api/runs/run-upload").json()["status"] == "awaiting_approval"
 
 
+def tender_upload(name="tender.pdf"):
+    """The optional tender as the browser sends it: one multipart part named 'tender'."""
+    from fpdf import FPDF
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=12)
+    pdf.cell(0, 10, txt="Tender No.: T/1", ln=True)
+    return [("tender", (name, io.BytesIO(bytes(pdf.output())), "application/pdf"))]
+
+
 def test_an_uploaded_bid_is_written_under_its_own_run_folder(client):
     """Each run keeps its own folder, so two runs cannot read each other's documents and every
     path is inside settings.bids_dir, which is what parse_bid_pdf insists on."""
@@ -195,6 +234,24 @@ def test_an_uploaded_bid_is_written_under_its_own_run_folder(client):
 
     saved = list((settings.uploads_dir / "run-folder").glob("*.pdf"))
     assert [path.name for path in saved] == ["apex.pdf"]
+
+
+def test_an_optional_tender_is_saved_under_the_run_and_reported(client):
+    response = client.post("/api/runs", files=pdf_upload() + tender_upload(),
+                           data={"run_id": "run-tender"})
+
+    assert response.status_code == 202
+    assert response.json()["tender_uploaded"] is True
+    saved = list((settings.uploads_dir / "run-tender" / "tender").glob("*.pdf"))
+    assert [path.name for path in saved] == ["tender.pdf"]
+    assert client.runner.get("run-tender").tender_path.endswith("tender.pdf")
+
+
+def test_a_run_without_a_tender_reports_that_none_was_uploaded(client):
+    response = client.post("/api/runs", files=pdf_upload(), data={"run_id": "run-no-tender"})
+
+    assert response.json()["tender_uploaded"] is False
+    assert client.runner.get("run-no-tender").tender_path is None
 
 
 def test_a_file_that_is_not_a_pdf_is_refused_by_name(client):
@@ -348,6 +405,36 @@ def test_the_report_is_served_as_the_markdown_the_agent_wrote(client):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/markdown")
     assert response.text == "# Price review evidence: T/1\n"
+
+
+def test_the_print_report_is_self_contained_html(client):
+    client.post("/api/runs", files=pdf_upload(), data={"run_id": "run-html"})
+    client.runner.get("run-html").state.update(REPORTED_STATE)
+
+    response = client.get("/api/runs/run-html/report.html")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.text.startswith("<!doctype html>")
+    assert "Price review evidence: T/1" in response.text
+    assert "Apex" in response.text
+    assert "KES 4,000,000.00" in response.text
+    assert "Classroom block" in response.text
+    assert "<script" not in response.text.lower()
+
+
+def test_the_print_report_is_gated_by_the_token(client):
+    client.post("/api/runs", files=pdf_upload(), data={"run_id": "run-html-locked"})
+    client.runner.get("run-html-locked").state.update(REPORTED_STATE)
+    client.headers.pop("X-API-Token")
+
+    assert client.get("/api/runs/run-html-locked/report.html").status_code == 401
+
+
+def test_a_run_with_no_report_has_no_print_report_yet(client):
+    client.post("/api/runs", files=pdf_upload(), data={"run_id": "run-html-bare"})
+
+    assert client.get("/api/runs/run-html-bare/report.html").status_code == 409
 
 
 def test_a_run_with_no_report_yet_says_so_instead_of_serving_nothing(client):

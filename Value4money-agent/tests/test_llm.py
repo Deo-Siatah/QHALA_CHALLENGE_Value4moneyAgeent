@@ -5,8 +5,8 @@ import pytest
 from agent import llm
 from agent.llm import LlmError, ask_json, get_model
 
-PROMPTS = ["intake_tender_profile", "research_next_move", "quality_similarity_judgement",
-           "quality_suspect_verdicts", "draft_review_wording"]
+PROMPTS = ["intake_tender_profile", "intake_tender_category", "research_next_move",
+           "quality_similarity_judgement", "quality_suspect_verdicts", "draft_review_wording"]
 
 
 class FakeReply:

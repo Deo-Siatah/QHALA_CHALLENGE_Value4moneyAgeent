@@ -17,10 +17,12 @@ from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, TypeAdapter, field_validator
 
+from mcp_server.tools.report_format import source_label
 from mcp_server.tools.submit_for_committee import PLACEHOLDERS
 
-# One run, one order. The terminal CLI prints the same eight and the UI must show the same eight.
-STEPS = ("intake", "research", "quality_check", "score", "draft", "verify_sources", "approval", "file")
+# One run, one order. The terminal CLI prints the same ten and the UI must show the same ten.
+STEPS = ("tender_intake", "bid_intake", "confirm_intake", "research", "quality_check", "score",
+         "draft", "verify_sources", "approval", "file")
 
 # The three decisions agent/nodes/approval.py accepts. publish_anyway is the deliberate override a
 # person gives for a report that holds no benchmark at all, which is why it is offered here too.
@@ -45,7 +47,7 @@ class StepStatus(str, Enum):
 
 
 class StepTiming(BaseModel):
-    """One of the eight steps, with how long it took and what it found."""
+    """One of the ten steps, with how long it took and what it found."""
 
     step: str
     index: int
@@ -63,6 +65,8 @@ class BidView(BaseModel):
     position: Optional[str] = None
     comment: str = ""
     arithmetic_issues: List[str] = Field(default_factory=list)
+    status: str = "ok"
+    confidence: str = ""
 
 
 class BenchmarkView(BaseModel):
@@ -83,6 +87,10 @@ class RunSnapshot(BaseModel):
     tender_ref: Optional[str] = None
     category: Optional[str] = None
     description: Optional[str] = None
+    tender: Dict[str, Any] = Field(default_factory=dict)
+    tender_missing: List[str] = Field(default_factory=list)
+    intake_confirmed: Optional[bool] = None
+    intake_issues: List[str] = Field(default_factory=list)
     current_step: Optional[str] = None
     elapsed_ms: float = 0.0
     steps: List[StepTiming] = Field(default_factory=list)
@@ -129,7 +137,7 @@ def _number(value: Any) -> Optional[float]:
 
 
 def _steps(current_step: Optional[str], timings: Dict[str, StepTiming]) -> List[StepTiming]:
-    """All eight steps in order, with the one in flight marked as running and the rest as they are."""
+    """All ten steps in order, with the one in flight marked as running and the rest as they are."""
     ordered = []
     for index, step in enumerate(STEPS):
         timing = timings.get(step, StepTiming(step=step, index=index))
@@ -175,13 +183,17 @@ def snapshot_from_state(state: Dict[str, Any], status: RunStatus,
 
     bids = []
     for bid in state.get("bids") or []:
+        if bid.get("status") != "ok":
+            continue
         row = benchmark_rows.get(bid.get("bidder")) or {}
         bids.append(BidView(bidder=bid.get("bidder", ""),
                             total=_number(bid.get("stated_total")),
                             pct_vs_median=_number(row.get("pct_vs_median")),
                             position=row.get("position"),
                             comment=comments.get(bid.get("bidder"), "") or "",
-                            arithmetic_issues=list(bid.get("issues") or [])))
+                            arithmetic_issues=list(bid.get("issues") or []),
+                            status=bid.get("status", "ok"),
+                            confidence=bid.get("confidence", "")))
 
     pool_values = [_number(row.get("value_kes")) for row in state.get("pool") or []]
     return RunSnapshot(
@@ -190,6 +202,10 @@ def snapshot_from_state(state: Dict[str, Any], status: RunStatus,
         tender_ref=state.get("tender_ref"),
         category=state.get("category"),
         description=state.get("description"),
+        tender=dict(state.get("tender") or {}),
+        tender_missing=list(state.get("tender_missing") or []),
+        intake_confirmed=state.get("intake_confirmed"),
+        intake_issues=list(state.get("intake_issues") or []),
         current_step=current_step,
         elapsed_ms=elapsed_ms,
         steps=_steps(current_step, timings or {}),
@@ -200,7 +216,9 @@ def snapshot_from_state(state: Dict[str, Any], status: RunStatus,
         excluded=dict(state.get("excluded") or {}),
         summary=state.get("summary", "") or "",
         bid_comments={str(bidder): str(text or "") for bidder, text in (state.get("bid_comments") or {}).items()},
-        findings=list(state.get("findings") or []),
+        findings=[{"text": finding.get("text", ""),
+                   "sources": [source_label(source) for source in finding.get("sources") or []]}
+                  for finding in state.get("findings") or []],
         sources=list(state.get("sources") or []),
         verify_ok=state.get("verify_ok"),
         verify_failures=list(state.get("verify_failures") or []),

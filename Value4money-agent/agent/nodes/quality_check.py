@@ -41,6 +41,12 @@ from agent.tools import flag_data_quality
 
 SAME_WORK = {"same_work": "keep", "different_work": "exclude"}
 KEEP_OR_EXCLUDE = ("keep", "exclude")
+SIMILARITY_CODES = ("different_work", "multi_scope")
+SUSPECT_CODES = ("value_unusable", "duplicate", "suspected_typo", "multi_scope")
+REASON_CODES = {
+    "quality_similarity_judgement": SIMILARITY_CODES,
+    "quality_suspect_verdicts": SUSPECT_CODES,
+}
 
 
 def _award_payload(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -70,7 +76,15 @@ def _verdicts(prompt_name: str, asked: Dict[str, Any], expected: List[str],
         if verdict not in vocabulary:
             raise ValueError(f"{prompt_name} returned verdict {verdict!r} for {award_id}, "
                              f"expected one of {list(vocabulary)}")
-        verdicts[award_id] = {"verdict": verdict, "reason": (entry or {}).get("reason") or ""}
+        code = (entry or {}).get("reason_code")
+        allowed = REASON_CODES[prompt_name]
+        if code is not None and code not in allowed:
+            raise ValueError(f"{prompt_name} returned reason_code {code!r} for {award_id}, "
+                             f"expected one of {list(allowed)}")
+        if code is None and verdict == "different_work":
+            code = "different_work"
+        verdicts[award_id] = {"verdict": verdict, "reason": (entry or {}).get("reason") or "",
+                              "reason_code": code or ""}
     return verdicts
 
 
@@ -180,22 +194,34 @@ def quality_check_node(state: AgentState) -> dict:
 
     pool: List[Dict[str, Any]] = []
     excluded: Dict[str, int] = {}
+    excluded_awards: List[Dict[str, Any]] = []
+
+    def set_aside(award_id: str, reason: str) -> None:
+        """Count one excluded award and keep the detail the annex prints."""
+        if reason == "multi_scope":
+            reason = "different_work"
+        excluded[reason] = excluded.get(reason, 0) + 1
+        row = _as_money(rows[award_id])
+        excluded_awards.append({"award_id": award_id, "title": row.get("title"),
+                                "value_kes": row.get("value_kes"), "reason_code": reason})
+
     for result in results:
         award_id = result["award_id"]
         if award_id in off_scale:
-            excluded["scale_mismatch"] = excluded.get("scale_mismatch", 0) + 1
+            set_aside(award_id, "scale_mismatch")
         elif result["verdict"] == "excluded":
             reason = result["reasons"][0] if result["reasons"] else "excluded"
-            excluded[reason] = excluded.get(reason, 0) + 1
+            set_aside(award_id, reason)
         elif result["verdict"] == "suspect":
-            if suspect_answers.get(award_id, {}).get("verdict") == "keep":
+            answer = suspect_answers.get(award_id, {})
+            if answer.get("verdict") == "keep":
                 pool.append(_as_money(rows[award_id]))
             else:
-                excluded["suspect_excluded"] = excluded.get("suspect_excluded", 0) + 1
+                set_aside(award_id, answer.get("reason_code") or "suspect_excluded")
         elif similarity.get(award_id, {}).get("verdict") == "same_work":
             pool.append(_as_money(rows[award_id]))
         else:
-            excluded["different_work"] = excluded.get("different_work", 0) + 1
+            set_aside(award_id, similarity.get(award_id, {}).get("reason_code") or "different_work")
 
     result: Dict[str, Any] = {
         "quality": quality,
@@ -203,6 +229,7 @@ def quality_check_node(state: AgentState) -> dict:
         "pool_size": len(pool),
         "pool_verdicts": pool_verdicts,
         "excluded": excluded,
+        "excluded_awards": excluded_awards,
         "quality_attempts": state.get("quality_attempts", 0) + 1,
     }
     if errors + suspect_errors:
