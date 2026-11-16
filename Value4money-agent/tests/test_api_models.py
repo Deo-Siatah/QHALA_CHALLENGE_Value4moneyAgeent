@@ -188,3 +188,80 @@ def test_a_snapshot_writes_each_finding_source_as_a_label_the_page_can_show():
 
     assert snapshot.findings == [{"text": "A finding.",
                                   "sources": ["a01", "Apex, apex.pdf p.4"]}]
+
+
+def test_a_step_timing_carries_its_tokens_and_its_cost():
+    timing = models.StepTiming(step="draft", index=6, status="done", elapsed_ms=1200,
+                               input_tokens=1000, output_tokens=500, cost_usd=0.002)
+
+    assert timing.input_tokens == 1000
+    assert timing.output_tokens == 500
+    assert timing.cost_usd == 0.002
+
+
+def test_a_snapshot_adds_up_the_cost_and_tokens_of_every_step():
+    timings = {
+        "quality_check": models.StepTiming(step="quality_check", index=4, status="done",
+                                           input_tokens=3000, output_tokens=1000,
+                                           cost_usd=0.004),
+        "draft": models.StepTiming(step="draft", index=6, status="done",
+                                   input_tokens=1000, output_tokens=500, cost_usd=0.002),
+    }
+
+    snapshot = models.snapshot_from_state({"run_id": "run-1"}, status="awaiting_approval",
+                                          timings=timings)
+
+    assert snapshot.total_input_tokens == 4000
+    assert snapshot.total_output_tokens == 1500
+    assert snapshot.total_cost_usd == 0.006
+
+
+def test_a_snapshot_with_no_priced_model_leaves_the_total_unset():
+    """An unpriced or locally served model has no cost to claim, so the UI shows nothing."""
+    timings = {"draft": models.StepTiming(step="draft", index=6, status="done",
+                                          input_tokens=1000, output_tokens=500)}
+
+    snapshot = models.snapshot_from_state({"run_id": "run-1"}, status="awaiting_approval",
+                                          timings=timings)
+
+    assert snapshot.total_input_tokens == 1000
+    assert snapshot.total_output_tokens == 500
+    assert snapshot.total_cost_usd is None
+
+
+def test_a_snapshot_lists_each_model_call_with_its_own_tokens_and_cost():
+    calls = [
+        {"step": "bid_intake", "prompt": "judge_similar_awards", "input_tokens": 1292,
+         "output_tokens": 306, "cost_usd": 0.0004},
+        {"step": "draft", "prompt": "draft_review_wording", "input_tokens": 1047,
+         "output_tokens": 465, "cost_usd": 0.0005},
+    ]
+
+    snapshot = models.snapshot_from_state({"run_id": "run-1"}, status="awaiting_approval",
+                                          model_calls=calls)
+
+    assert snapshot.total_model_calls == 2
+    assert [call.prompt for call in snapshot.model_calls] == ["judge_similar_awards",
+                                                              "draft_review_wording"]
+    assert snapshot.model_calls[0].input_tokens == 1292
+    assert snapshot.model_calls[1].cost_usd == 0.0005
+
+
+def test_a_snapshot_carries_the_unit_economics_of_the_run(monkeypatch):
+    from config import settings
+
+    monkeypatch.setattr(settings, "tool_fee_usd_per_outcome", 0.10)
+    timings = {"draft": models.StepTiming(step="draft", index=6, status="done",
+                                          input_tokens=1000, output_tokens=500,
+                                          cost_usd=0.0036)}
+    calls = [{"step": "draft", "prompt": "draft_review_wording", "input_tokens": 1000,
+              "output_tokens": 500, "cost_usd": 0.0036}]
+
+    snapshot = models.snapshot_from_state({"run_id": "run-1"}, status="awaiting_approval",
+                                          timings=timings, model_calls=calls)
+
+    assert snapshot.unit_economics.cost_per_answer_usd == pytest.approx(0.0036)
+    assert snapshot.unit_economics.cost_per_outcome_usd == pytest.approx(0.1036)
+    assert snapshot.unit_economics.tool_fee_usd == pytest.approx(0.10)
+    assert "price_per_outcome_usd" not in snapshot.unit_economics.model_dump()
+    assert "margin_per_outcome_usd" not in snapshot.unit_economics.model_dump()

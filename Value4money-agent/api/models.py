@@ -17,6 +17,7 @@ from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, TypeAdapter, field_validator
 
+from agent import economics
 from mcp_server.tools.report_format import source_label
 from mcp_server.tools.submit_for_committee import PLACEHOLDERS
 
@@ -47,13 +48,16 @@ class StepStatus(str, Enum):
 
 
 class StepTiming(BaseModel):
-    """One of the ten steps, with how long it took and what it found."""
+    """One of the ten steps, with how long it took, what it found, and what its model calls used."""
 
     step: str
     index: int
     status: StepStatus = StepStatus.pending
     elapsed_ms: float = 0.0
     summary: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: Optional[float] = None
 
 
 class BidView(BaseModel):
@@ -77,6 +81,26 @@ class BenchmarkView(BaseModel):
     median_kes: Optional[float] = None
     q1_kes: Optional[float] = None
     q3_kes: Optional[float] = None
+
+
+class ModelCallView(BaseModel):
+    """One model answer, with the tokens and cost the callback measured for it."""
+
+    step: str
+    prompt: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: Optional[float] = None
+
+
+class UnitEconomicsView(BaseModel):
+    """What one completed review cost to compute."""
+
+    model_calls: int = 0
+    cost_per_answer_usd: Optional[float] = None
+    total_llm_cost_usd: Optional[float] = None
+    tool_fee_usd: float = 0.0
+    cost_per_outcome_usd: Optional[float] = None
 
 
 class RunSnapshot(BaseModel):
@@ -108,6 +132,12 @@ class RunSnapshot(BaseModel):
     errors: List[str] = Field(default_factory=list)
     parse_issues: List[str] = Field(default_factory=list)
     submission: Optional[Dict[str, Any]] = None
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cost_usd: Optional[float] = None
+    model_calls: List[ModelCallView] = Field(default_factory=list)
+    total_model_calls: int = 0
+    unit_economics: Optional[UnitEconomicsView] = None
 
 
 class ApprovalBody(BaseModel):
@@ -169,7 +199,8 @@ def summarise(step: str, update: Dict[str, Any]) -> str:
 
 def snapshot_from_state(state: Dict[str, Any], status: RunStatus,
                         current_step: Optional[str] = None, elapsed_ms: float = 0.0,
-                        timings: Optional[Dict[str, StepTiming]] = None) -> RunSnapshot:
+                        timings: Optional[Dict[str, StepTiming]] = None,
+                        model_calls: Optional[List[Dict[str, Any]]] = None) -> RunSnapshot:
     """Read the agent's state into the shape the run page renders.
 
     The bid totals and the percentages come from two different places in the state: the bids carry
@@ -196,6 +227,11 @@ def snapshot_from_state(state: Dict[str, Any], status: RunStatus,
                             confidence=bid.get("confidence", "")))
 
     pool_values = [_number(row.get("value_kes")) for row in state.get("pool") or []]
+    ordered_steps = _steps(current_step, timings or {})
+    costs = [timing.cost_usd for timing in ordered_steps if timing.cost_usd is not None]
+    total_cost = sum(costs) if costs else None
+    calls = [ModelCallView(**call) for call in (model_calls or [])]
+    figures = economics.unit_economics(total_cost, len(calls))
     return RunSnapshot(
         run_id=state.get("run_id", ""),
         status=status,
@@ -208,7 +244,7 @@ def snapshot_from_state(state: Dict[str, Any], status: RunStatus,
         intake_issues=list(state.get("intake_issues") or []),
         current_step=current_step,
         elapsed_ms=elapsed_ms,
-        steps=_steps(current_step, timings or {}),
+        steps=ordered_steps,
         bids=bids,
         benchmark=_bids_benchmark_view(benchmark),
         pool_size=state.get("pool_size", 0) or 0,
@@ -225,6 +261,12 @@ def snapshot_from_state(state: Dict[str, Any], status: RunStatus,
         errors=list(state.get("errors") or []),
         parse_issues=list(state.get("parse_issues") or []),
         submission=state.get("submission"),
+        total_input_tokens=sum(timing.input_tokens for timing in ordered_steps),
+        total_output_tokens=sum(timing.output_tokens for timing in ordered_steps),
+        total_cost_usd=total_cost,
+        model_calls=calls,
+        total_model_calls=len(calls),
+        unit_economics=UnitEconomicsView(**figures),
     )
 
 
@@ -248,7 +290,7 @@ class StepStarted(BaseModel):
 
 
 class StepFinished(BaseModel):
-    """A node finished: how long it took, what it found, and what it returned."""
+    """A node finished: how long it took, what it found, and what its model calls used."""
 
     type: Literal["step.finished"] = "step.finished"
     step: str
@@ -256,6 +298,9 @@ class StepFinished(BaseModel):
     elapsed_ms: float
     summary: str = ""
     data: Optional[Dict[str, Any]] = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: Optional[float] = None
 
 
 class ModelToken(BaseModel):
@@ -267,12 +312,15 @@ class ModelToken(BaseModel):
 
 
 class ModelDone(BaseModel):
-    """One model call finished, and which prompt it was."""
+    """One model call finished, which prompt it was, and what it used."""
 
     type: Literal["model.done"] = "model.done"
     step: str
     prompt: str = ""
     elapsed_ms: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: Optional[float] = None
 
 
 class ApprovalRequired(BaseModel):

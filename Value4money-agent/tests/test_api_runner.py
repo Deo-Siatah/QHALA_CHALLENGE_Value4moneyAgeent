@@ -83,12 +83,23 @@ class State:
 class FakeGraph:
     """A graph that yields the chunks it was given, calling the callbacks around each node."""
 
-    def __init__(self, chunks, values=None, raises=None):
+    def __init__(self, chunks, values=None, raises=None, llm_usage=None):
         self.chunks = chunks
         self.values = values or {}
         self.raises = raises
+        self.llm_usage = llm_usage
         self.seen = []
         self.configs = []
+
+    def _llm_response(self):
+        from types import SimpleNamespace
+
+        input_tokens, output_tokens = self.llm_usage
+        return SimpleNamespace(
+            generations=[[SimpleNamespace(message=SimpleNamespace(usage_metadata={
+                "input_tokens": input_tokens, "output_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens}))]],
+            llm_output=None)
 
     def stream(self, payload, config, stream_mode=None):
         self.seen.append(payload)
@@ -100,6 +111,10 @@ class FakeGraph:
                     continue
                 for callback in callbacks:
                     callback.on_chain_start({}, {}, run_id=f"node-{index}", name=name)
+                if self.llm_usage is not None:
+                    for callback in callbacks:
+                        callback.on_llm_start({}, run_id=f"llm-{index}", name="ChatGroq")
+                        callback.on_llm_end(self._llm_response(), run_id=f"llm-{index}")
                 for callback in callbacks:
                     callback.on_chain_end(update, run_id=f"node-{index}")
             if self.raises is not None:
@@ -382,3 +397,47 @@ def test_a_step_summary_is_the_line_the_terminal_prints():
 
     assert models.summarise("research", update) == "1 candidates"
     assert models.summarise("quality_check", update) == "pool 17 · excluded 2"
+
+
+def test_a_snapshot_carries_the_cost_the_handler_measured(monkeypatch):
+    from agent import pricing
+
+    monkeypatch.setattr(pricing.settings, "llm_input_usd_per_mtok", 1.0)
+    monkeypatch.setattr(pricing.settings, "llm_output_usd_per_mtok", 2.0)
+    r = Runner(FakeGraph([{"draft": {}}], llm_usage=(1000, 500)))
+
+    run = r.start("run-1", ["a.pdf"])
+    wait(lambda: run.status in SETTLED)
+
+    snapshot = r.snapshot("run-1")
+    draft = next(timing for timing in snapshot.steps if timing.step == "draft")
+    assert draft.input_tokens == 1000
+    assert draft.output_tokens == 500
+    assert draft.cost_usd == pytest.approx(0.002)
+    assert snapshot.total_input_tokens == 1000
+    assert snapshot.total_output_tokens == 500
+    assert snapshot.total_cost_usd == pytest.approx(0.002)
+
+
+def test_a_snapshot_carries_each_model_call_and_the_unit_economics(monkeypatch):
+    from agent import pricing
+    from config import settings
+
+    monkeypatch.setattr(pricing.settings, "llm_input_usd_per_mtok", 1.0)
+    monkeypatch.setattr(pricing.settings, "llm_output_usd_per_mtok", 2.0)
+    monkeypatch.setattr(settings, "tool_fee_usd_per_outcome", 0.01)
+    r = Runner(FakeGraph([{"draft": {}}], llm_usage=(1000, 500)))
+
+    run = r.start("run-1", ["a.pdf"])
+    wait(lambda: run.status in SETTLED)
+
+    snapshot = r.snapshot("run-1")
+    assert snapshot.total_model_calls == 1
+    assert snapshot.model_calls[0].step == "draft"
+    assert snapshot.model_calls[0].input_tokens == 1000
+    assert snapshot.model_calls[0].output_tokens == 500
+    assert snapshot.model_calls[0].cost_usd == pytest.approx(0.002)
+    assert snapshot.unit_economics.cost_per_answer_usd == pytest.approx(0.002)
+    assert snapshot.unit_economics.cost_per_outcome_usd == pytest.approx(0.012)
+    assert "price_per_outcome_usd" not in snapshot.unit_economics.model_dump()
+    assert "margin_per_outcome_usd" not in snapshot.unit_economics.model_dump()

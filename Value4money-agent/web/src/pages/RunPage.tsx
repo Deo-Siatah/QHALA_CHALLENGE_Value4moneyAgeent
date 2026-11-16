@@ -14,10 +14,11 @@ import { PoolBoxPlot } from "../components/PoolBoxPlot";
 import { Findings, ReportView } from "../components/ReportView";
 import { StatusBadge } from "../components/StatusBadge";
 import { StepStream } from "../components/StepStream";
+import { UnitEconomics } from "../components/UnitEconomics";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "../components/ui/card";
-import { elapsed, exclusionWord, KES } from "../lib/format";
+import { elapsed, exclusionWord, KES, tokenCount, USD } from "../lib/format";
 
 /** How often the clock ticks between heartbeats. A slow step is silent, and a page that stops
  * counting during a forty second step looks broken. */
@@ -97,6 +98,14 @@ export function RunPage() {
         </div>
         <div className="flex items-center gap-3">
           <StatusBadge status={status} />
+          {(view.totalInputTokens > 0 || view.totalOutputTokens > 0) && (
+            <span className="tabular-nums text-xs text-ink-400">
+              {tokenCount(view.totalInputTokens, view.totalOutputTokens)}
+            </span>
+          )}
+          {view.totalCostUsd !== null && (
+            <span className="tabular-nums text-xs text-ink-400">{USD(view.totalCostUsd)}</span>
+          )}
           <span className="tabular-nums text-sm text-ink-500">{elapsed(view.elapsedMs)}</span>
         </div>
         </div>
@@ -140,6 +149,12 @@ export function RunPage() {
             runId={runId} status={status} />
         )} />
       </div>
+
+      {state?.unit_economics && state.total_model_calls > 0 && (
+        <div className="mt-6">
+          <UnitEconomics economics={state.unit_economics} calls={state.model_calls} />
+        </div>
+      )}
     </div>
   );
 }
@@ -305,10 +320,15 @@ function emptySnapshot(runId: string, status: RunSnapshot["status"] | "queued" |
     status: status as RunSnapshot["status"],
     tender_ref: null, category: null, description: null, tender: {}, tender_missing: [],
     intake_confirmed: null, intake_issues: [], current_step: null, elapsed_ms: 0,
-    steps: STEPS.map((step, index) => ({ step, index, status: "done", elapsed_ms: 0, summary: "" })),
+    steps: STEPS.map((step, index) => ({
+      step, index, status: "done", elapsed_ms: 0, summary: "",
+      input_tokens: 0, output_tokens: 0, cost_usd: null,
+    })),
     bids: [], benchmark: null, pool_size: 0, pool_values: [], excluded: {}, summary: "",
     bid_comments: {}, findings: [], sources: [], verify_ok: true, verify_failures: [], errors: [],
     parse_issues: [], submission: null,
+    total_input_tokens: 0, total_output_tokens: 0, total_cost_usd: null,
+    model_calls: [], total_model_calls: 0, unit_economics: null,
   };
 }
 
@@ -317,9 +337,17 @@ function stepsFromSnapshot(snapshot: RunSnapshot) {
   return Object.fromEntries(
     snapshot.steps.map((timing) => [
       timing.step,
-      { status: timing.status, elapsedMs: timing.elapsed_ms, summary: timing.summary ?? "" },
+      {
+        status: timing.status,
+        elapsedMs: timing.elapsed_ms,
+        summary: timing.summary ?? "",
+        inputTokens: timing.input_tokens ?? 0,
+        outputTokens: timing.output_tokens ?? 0,
+        costUsd: timing.cost_usd ?? null,
+      },
     ]),
-  ) as Record<Step, { status: "pending" | "running" | "done"; elapsedMs: number; summary: string }>;
+  ) as Record<Step, { status: "pending" | "running" | "done"; elapsedMs: number; summary: string;
+    inputTokens: number; outputTokens: number; costUsd: number | null }>;
 }
 
 /** Kept for the button import the report tab needs. */

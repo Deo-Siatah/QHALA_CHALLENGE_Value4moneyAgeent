@@ -25,6 +25,7 @@ from typing import Any, AsyncIterator, Callable, Dict, List, NamedTuple, Optiona
 
 from langchain_core.callbacks import BaseCallbackHandler
 
+from agent import pricing
 from api import models
 
 # Tells an empty buffer from a closed one, which both return None from _take but mean opposite things.
@@ -34,6 +35,28 @@ _NOTHING = object()
 def _now() -> str:
     """The moment an event happened, in the ISO form the UI and the audit log both use."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _counts(usage: Any) -> Tuple[int, int]:
+    """Read input and output token counts from either LangChain's or a provider's names."""
+    if not isinstance(usage, dict):
+        return 0, 0
+    input_tokens = usage.get("input_tokens", usage.get("prompt_tokens", 0)) or 0
+    output_tokens = usage.get("output_tokens", usage.get("completion_tokens", 0)) or 0
+    return int(input_tokens), int(output_tokens)
+
+
+def _usage_from_response(response: Any) -> Tuple[int, int]:
+    """The token counts off a finished model call, from the message or the provider's output."""
+    usage = None
+    try:
+        usage = getattr(response.generations[-1][-1].message, "usage_metadata", None)
+    except (AttributeError, IndexError, TypeError):
+        usage = None
+    if not usage:
+        output = getattr(response, "llm_output", None)
+        usage = output.get("token_usage") if isinstance(output, dict) else None
+    return _counts(usage)
 
 
 class RunEventChannel:
@@ -171,6 +194,9 @@ class RunEventHandler(BaseCallbackHandler):
         self.tokens: List[str] = []
         self.model_prompts: List[str] = []
         self.model_times: List[Tuple[str, float]] = []
+        self.step_tokens: Dict[str, Dict[str, int]] = {}
+        self.step_costs: Dict[str, float] = {}
+        self.model_usage: List[Dict[str, Any]] = []
         self._open_steps: Dict[Any, Tuple[str, int, float]] = {}
         self._open_models: Dict[Any, Tuple[str, float]] = {}
 
@@ -226,9 +252,14 @@ class RunEventHandler(BaseCallbackHandler):
         name, index, started_at = opened
         elapsed_ms = (self.clock() - started_at) * 1000
         data = outputs if isinstance(outputs, dict) else None
+        tokens = self.step_tokens.get(name, {})
         self.steps.append(StepRecord(name, index, elapsed_ms))
         self.step_data.append(data)
-        self._emit(models.StepFinished(step=name, index=index, elapsed_ms=elapsed_ms, data=data))
+        self._emit(models.StepFinished(
+            step=name, index=index, elapsed_ms=elapsed_ms, data=data,
+            input_tokens=tokens.get("input_tokens", 0),
+            output_tokens=tokens.get("output_tokens", 0),
+            cost_usd=self.step_costs.get(name)))
 
     def on_llm_start(self, serialized: Any, prompts: Any = None, **kwargs: Any) -> None:
         """A model call began, so its words can be timed and attributed to a step."""
@@ -252,6 +283,19 @@ class RunEventHandler(BaseCallbackHandler):
             return
         name, started_at = opened
         elapsed_ms = (self.clock() - started_at) * 1000
+        step = self.current_step
+        input_tokens, output_tokens = _usage_from_response(response)
+        cost = pricing.cost_usd(input_tokens, output_tokens) if input_tokens or output_tokens else None
+        if input_tokens or output_tokens:
+            totals = self.step_tokens.setdefault(step, {"input_tokens": 0, "output_tokens": 0})
+            totals["input_tokens"] += input_tokens
+            totals["output_tokens"] += output_tokens
+        if cost is not None:
+            self.step_costs[step] = self.step_costs.get(step, 0.0) + cost
         self.model_prompts.append(name)
         self.model_times.append((name, elapsed_ms))
-        self._emit(models.ModelDone(step=self.current_step, prompt=name, elapsed_ms=elapsed_ms))
+        self.model_usage.append({"step": step, "prompt": name, "input_tokens": input_tokens,
+                                 "output_tokens": output_tokens, "cost_usd": cost})
+        self._emit(models.ModelDone(step=step, prompt=name, elapsed_ms=elapsed_ms,
+                                    input_tokens=input_tokens, output_tokens=output_tokens,
+                                    cost_usd=cost))

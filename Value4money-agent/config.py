@@ -1,4 +1,6 @@
 from pathlib import Path
+from typing import Optional
+
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
@@ -27,6 +29,9 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.0, env="LLM_TEMPERATURE")
     llm_timeout_s: int = Field(default=120, env="LLM_TIMEOUT_S")
     llm_max_tokens: int = Field(default=16384, env="LLM_MAX_TOKENS")
+    llm_input_usd_per_mtok: Optional[float] = Field(default=None, env="LLM_INPUT_USD_PER_MTOK")
+    llm_output_usd_per_mtok: Optional[float] = Field(default=None, env="LLM_OUTPUT_USD_PER_MTOK")
+    tool_fee_usd_per_outcome: float = Field(default=0.0, env="TOOL_FEE_USD_PER_OUTCOME")
     ollama_base_url: str = Field(default="http://localhost:11434", env="OLLAMA_BASE_URL")
     groq_api_key: str = Field(default="", env="GROQ_API_KEY", repr=False)
     opik_enabled: bool = Field(default=True, env="OPIK_ENABLED")

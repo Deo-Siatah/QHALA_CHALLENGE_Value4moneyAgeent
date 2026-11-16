@@ -18,6 +18,31 @@ export const KES = (value: number | null | undefined): string =>
 export const PERCENT = (value: number | null | undefined): string =>
   value === null || value === undefined ? "n/a" : `${value.toFixed(1)}%`;
 
+/** A token count, short enough to sit beside a step without pushing the layout around. */
+function compactTokens(value: number): string {
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1)}m`;
+  }
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(1)}k`;
+  }
+  return String(value);
+}
+
+export const tokenCount = (input: number, output: number): string =>
+  `${compactTokens(input)} in / ${compactTokens(output)} out`;
+
+/** A USD cost. An unpriced model has no number to show, so it says so rather than "free". */
+export const USD = (value: number | null | undefined): string => {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "—";
+  }
+  if (value > 0 && value < 0.0001) {
+    return "< $0.0001";
+  }
+  return `$${value.toFixed(4)}`;
+};
+
 /** A duration, short enough to sit beside a step without pushing the layout around. */
 export function elapsed(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) {

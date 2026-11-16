@@ -27,6 +27,38 @@ describe("the reducer, against a recorded run", () => {
     expect(view.steps.approval.status).toBe("pending");
   });
 
+  it("adds up each model call's tokens and cost against the step it belonged to", () => {
+    const view = play([
+      { type: "run.started", run_id: "run-1", steps: [...STEPS], started_at: "" },
+      { type: "step.started", step: "draft", index: 6, at: "" },
+      { type: "model.done", step: "draft", prompt: "ChatGroq", elapsed_ms: 10,
+        input_tokens: 1000, output_tokens: 500, cost_usd: 0.002 },
+      { type: "model.done", step: "draft", prompt: "ChatGroq", elapsed_ms: 10,
+        input_tokens: 200, output_tokens: 100, cost_usd: 0.0004 },
+    ]);
+
+    expect(view.steps.draft.inputTokens).toBe(1200);
+    expect(view.steps.draft.outputTokens).toBe(600);
+    expect(view.steps.draft.costUsd).toBeCloseTo(0.0024);
+    expect(view.totalInputTokens).toBe(1200);
+    expect(view.totalOutputTokens).toBe(600);
+    expect(view.totalCostUsd).toBeCloseTo(0.0024);
+  });
+
+  it("uses the step's cumulative figures when a step finishes, without counting them twice", () => {
+    const view = play([
+      { type: "run.started", run_id: "run-1", steps: [...STEPS], started_at: "" },
+      { type: "step.started", step: "draft", index: 6, at: "" },
+      { type: "model.done", step: "draft", prompt: "ChatGroq", elapsed_ms: 10,
+        input_tokens: 1000, output_tokens: 500, cost_usd: 0.002 },
+      { type: "step.finished", step: "draft", index: 6, elapsed_ms: 1200,
+        input_tokens: 1000, output_tokens: 500, cost_usd: 0.002 },
+    ]);
+
+    expect(view.steps.draft.costUsd).toBeCloseTo(0.002);
+    expect(view.totalCostUsd).toBeCloseTo(0.002);
+  });
+
   it("shows the agent's own one-line summary under a finished step", () => {
     const view = play(REPLAY);
 
@@ -144,6 +176,9 @@ describe("the reducer, against a recorded run", () => {
         status: index < 8 ? "done" : index === 8 ? "running" : "pending",
         elapsed_ms: index < 8 ? 1000 : 0,
         summary: index === 4 ? "pool 17 · excluded 13" : "",
+        input_tokens: index === 6 ? 3000 : 0,
+        output_tokens: index === 6 ? 900 : 0,
+        cost_usd: index === 6 ? 0.0042 : null,
       })),
       bids: [],
       benchmark: null,
@@ -159,6 +194,12 @@ describe("the reducer, against a recorded run", () => {
       errors: ["one thing went wrong"],
       parse_issues: [],
       submission: null,
+      total_input_tokens: 3000,
+      total_output_tokens: 900,
+      total_cost_usd: 0.0042,
+      model_calls: [],
+      total_model_calls: 0,
+      unit_economics: null,
     };
 
     const view = reduce(initialView("run-1"), { kind: "snapshot", snapshot });
@@ -168,6 +209,9 @@ describe("the reducer, against a recorded run", () => {
     expect(view.steps.approval.status).toBe("running");
     expect(view.elapsedMs).toBe(41_200);
     expect(view.errors.map((error) => error.message)).toContain("one thing went wrong");
+    expect(view.totalInputTokens).toBe(3000);
+    expect(view.totalOutputTokens).toBe(900);
+    expect(view.totalCostUsd).toBeCloseTo(0.0042);
   });
 
   it("does not double up the errors a snapshot and an event both reported", () => {

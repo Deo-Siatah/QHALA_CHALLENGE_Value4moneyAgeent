@@ -54,6 +54,9 @@ export interface StepTiming {
   status: StepStatus;
   elapsed_ms: number;
   summary: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number | null;
 }
 
 export interface TenderField {
@@ -101,6 +104,22 @@ export interface Finding {
   sources: string[];
 }
 
+export interface ModelCall {
+  step: Step;
+  prompt: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number | null;
+}
+
+export interface UnitEconomics {
+  model_calls: number;
+  cost_per_answer_usd: number | null;
+  total_llm_cost_usd: number | null;
+  tool_fee_usd: number;
+  cost_per_outcome_usd: number | null;
+}
+
 export interface RunSnapshot {
   run_id: string;
   status: RunStatus;
@@ -128,6 +147,12 @@ export interface RunSnapshot {
   errors: string[];
   parse_issues: string[];
   submission: Record<string, unknown> | null;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cost_usd: number | null;
+  model_calls: ModelCall[];
+  total_model_calls: number;
+  unit_economics: UnitEconomics | null;
 }
 
 /** The approval node's own payload, sent verbatim inside approval.required.
@@ -162,9 +187,20 @@ export type RunEvent =
       elapsed_ms: number;
       summary?: string;
       data?: Record<string, unknown> | null;
+      input_tokens?: number;
+      output_tokens?: number;
+      cost_usd?: number | null;
     }
   | { type: "model.token"; step: Step; delta: string }
-  | { type: "model.done"; step: Step; prompt: string; elapsed_ms: number }
+  | {
+      type: "model.done";
+      step: Step;
+      prompt: string;
+      elapsed_ms: number;
+      input_tokens?: number;
+      output_tokens?: number;
+      cost_usd?: number | null;
+    }
   | { type: "approval.required"; request: ApprovalRequest }
   | { type: "run.finished"; status: RunStatus; submission?: Record<string, unknown> | null }
   | { type: "run.error"; step?: Step | null; message: string }

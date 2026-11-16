@@ -21,6 +21,9 @@ export interface StepCell {
   status: StepStatus;
   elapsedMs: number;
   summary: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number | null;
 }
 
 export interface RunView {
@@ -36,6 +39,9 @@ export interface RunView {
   submission: Record<string, unknown> | null;
   elapsedMs: number;
   heartbeats: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCostUsd: number | null;
 }
 
 export type Action =
@@ -43,7 +49,14 @@ export type Action =
   | { kind: "snapshot"; snapshot: RunSnapshot }
   | { kind: "tick"; ms: number };
 
-const PENDING: StepCell = { status: "pending", elapsedMs: 0, summary: "" };
+const PENDING: StepCell = {
+  status: "pending",
+  elapsedMs: 0,
+  summary: "",
+  inputTokens: 0,
+  outputTokens: 0,
+  costUsd: null,
+};
 
 function blankSteps(): Record<Step, StepCell> {
   return Object.fromEntries(STEPS.map((step) => [step, { ...PENDING }])) as Record<Step, StepCell>;
@@ -62,6 +75,9 @@ export function initialView(runId: string): RunView {
     submission: null,
     elapsedMs: 0,
     heartbeats: 0,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalCostUsd: null,
   };
 }
 
@@ -70,6 +86,17 @@ function withStep(view: RunView, step: Step, cell: Partial<StepCell>): RunView {
   return {
     ...view,
     steps: { ...view.steps, [step]: { ...previous, ...cell } },
+  };
+}
+
+/** The run's whole model spend, read back from the steps so a late cumulative event cannot double count. */
+function totalsOf(steps: Record<Step, StepCell>) {
+  const cells = Object.values(steps);
+  const costs = cells.map((cell) => cell.costUsd).filter((cost): cost is number => cost !== null);
+  return {
+    totalInputTokens: cells.reduce((sum, cell) => sum + cell.inputTokens, 0),
+    totalOutputTokens: cells.reduce((sum, cell) => sum + cell.outputTokens, 0),
+    totalCostUsd: costs.length > 0 ? costs.reduce((sum, cost) => sum + cost, 0) : null,
   };
 }
 
@@ -102,8 +129,12 @@ function fromSnapshot(view: RunView, snapshot: RunSnapshot): RunView {
       status: timing.status,
       elapsedMs: timing.elapsed_ms ?? 0,
       summary: timing.summary ?? "",
+      inputTokens: timing.input_tokens ?? 0,
+      outputTokens: timing.output_tokens ?? 0,
+      costUsd: timing.cost_usd ?? null,
     };
   }
+  const totals = totalsOf(steps);
   return {
     ...view,
     runId: snapshot.run_id,
@@ -113,6 +144,9 @@ function fromSnapshot(view: RunView, snapshot: RunSnapshot): RunView {
     elapsedMs: snapshot.elapsed_ms ?? 0,
     submission: snapshot.submission ?? null,
     errors: mergeErrors(view.errors, (snapshot.errors ?? []).map((message) => ({ step: null, message }))),
+    totalInputTokens: snapshot.total_input_tokens ?? totals.totalInputTokens,
+    totalOutputTokens: snapshot.total_output_tokens ?? totals.totalOutputTokens,
+    totalCostUsd: snapshot.total_cost_usd ?? totals.totalCostUsd,
   };
 }
 
@@ -135,14 +169,22 @@ function fromEvent(view: RunView, event: RunEvent): RunView {
       if (!isStep(event.step)) {
         return view;
       }
-      return {
-        ...withStep(view, event.step, {
-          status: "done",
-          elapsedMs: event.elapsed_ms ?? 0,
-          summary: event.summary ?? "",
-        }),
-        currentStep: null,
+      const cumulative: Partial<StepCell> = {
+        status: "done",
+        elapsedMs: event.elapsed_ms ?? 0,
+        summary: event.summary ?? "",
       };
+      if (event.input_tokens !== undefined) {
+        cumulative.inputTokens = event.input_tokens;
+      }
+      if (event.output_tokens !== undefined) {
+        cumulative.outputTokens = event.output_tokens;
+      }
+      if (event.cost_usd !== undefined) {
+        cumulative.costUsd = event.cost_usd;
+      }
+      const next = withStep(view, event.step, cumulative);
+      return { ...next, currentStep: null, ...totalsOf(next.steps) };
     }
 
     case "model.token": {
@@ -150,8 +192,19 @@ function fromEvent(view: RunView, event: RunEvent): RunView {
       return { ...view, tokens, tokensOpen: true };
     }
 
-    case "model.done":
-      return { ...view, tokensOpen: false };
+    case "model.done": {
+      if (!isStep(event.step)) {
+        return { ...view, tokensOpen: false };
+      }
+      const cell = view.steps[event.step] ?? PENDING;
+      const cost = event.cost_usd ?? null;
+      const next = withStep(view, event.step, {
+        inputTokens: cell.inputTokens + (event.input_tokens ?? 0),
+        outputTokens: cell.outputTokens + (event.output_tokens ?? 0),
+        costUsd: cost === null ? cell.costUsd : (cell.costUsd ?? 0) + cost,
+      });
+      return { ...next, tokensOpen: false, ...totalsOf(next.steps) };
+    }
 
     case "approval.required":
       return {

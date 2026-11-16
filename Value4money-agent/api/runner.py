@@ -235,9 +235,13 @@ class Runner:
         one line the run page shows beside a step can be read out of the node's own answer.
         """
         for record, data in zip(run.handler.steps, run.handler.step_data):
+            tokens = run.handler.step_tokens.get(record.step, {})
             run.timings[record.step] = models.StepTiming(
                 step=record.step, index=record.index, status=models.StepStatus.done,
-                elapsed_ms=record.elapsed_ms, summary=models.summarise(record.step, data or {}))
+                elapsed_ms=record.elapsed_ms, summary=models.summarise(record.step, data or {}),
+                input_tokens=tokens.get("input_tokens", 0),
+                output_tokens=tokens.get("output_tokens", 0),
+                cost_usd=run.handler.step_costs.get(record.step))
         try:
             values = self.graph.get_state(config).values
         except Exception:
@@ -277,7 +281,8 @@ class Runner:
         run = self.get(run_id)
         current = self._current_step(run)
         return models.snapshot_from_state(run.state, status=run.status, current_step=current,
-                                          elapsed_ms=run.elapsed_ms(), timings=run.timings)
+                                          elapsed_ms=run.elapsed_ms(), timings=run.timings,
+                                          model_calls=run.handler.model_usage)
 
     def channel_for(self, run_id: str) -> RunEventChannel:
         """The channel a run's events arrive on, for the SSE connection to read."""

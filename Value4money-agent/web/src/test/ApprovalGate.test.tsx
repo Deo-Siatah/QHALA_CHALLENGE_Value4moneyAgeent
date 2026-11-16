@@ -63,6 +63,12 @@ const snapshot: RunSnapshot = {
   errors: [],
   parse_issues: [],
   submission: null,
+  total_input_tokens: 0,
+  total_output_tokens: 0,
+  total_cost_usd: null,
+  model_calls: [],
+  total_model_calls: 0,
+  unit_economics: null,
 };
 
 function gate(overrides: Partial<ApprovalRequest> = {}) {

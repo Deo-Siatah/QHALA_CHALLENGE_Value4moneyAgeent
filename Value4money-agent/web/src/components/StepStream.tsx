@@ -3,7 +3,7 @@ import { Check, ChevronDown, Loader2 } from "lucide-react";
 import type { Step } from "../api/types";
 import { STEPS, STEP_WORDS } from "../api/types";
 import type { StepCell } from "../api/events";
-import { elapsed } from "../lib/format";
+import { elapsed, tokenCount, USD } from "../lib/format";
 import { cn } from "../lib/utils";
 
 /**
@@ -23,7 +23,14 @@ import { cn } from "../lib/utils";
 
 export type StreamPhase = "processing" | "summary";
 
-const PENDING: StepCell = { status: "pending", elapsedMs: 0, summary: "" };
+const PENDING: StepCell = {
+  status: "pending",
+  elapsedMs: 0,
+  summary: "",
+  inputTokens: 0,
+  outputTokens: 0,
+  costUsd: null,
+};
 
 /** The step to hold in the focal slot: the running one, else the first not-yet-done one. */
 function activeStepOf(steps: Record<Step, StepCell>, currentStep: Step | null): Step {
@@ -212,9 +219,13 @@ function SummaryRow({
           )}
         </span>
 
-        {cell.elapsedMs > 0 && (
-          <span className="ml-auto shrink-0 text-xs tabular-nums text-ink-400">{elapsed(cell.elapsedMs)}</span>
-        )}
+        <span className="ml-auto flex shrink-0 items-center gap-2 text-xs tabular-nums text-ink-400">
+          {(cell.inputTokens > 0 || cell.outputTokens > 0) && (
+            <span>{tokenCount(cell.inputTokens, cell.outputTokens)}</span>
+          )}
+          {cell.costUsd !== null && <span>{USD(cell.costUsd)}</span>}
+          {cell.elapsedMs > 0 && <span>{elapsed(cell.elapsedMs)}</span>}
+        </span>
 
         {/* The summary sits inside the button on purpose. A reader's eye goes to the sentence, not to
             the title strip above it, so the sentence has to be the thing they press. */}

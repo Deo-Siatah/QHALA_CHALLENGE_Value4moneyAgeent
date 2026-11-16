@@ -20,7 +20,15 @@ function stream(overrides: Partial<Record<Step, Partial<StepCell>>> = {}) {
   return Object.fromEntries(
     STEPS.map((step) => [
       step,
-      { status: "pending" as StepStatus, elapsedMs: 0, summary: "", ...(overrides[step] ?? {}) },
+      {
+        status: "pending" as StepStatus,
+        elapsedMs: 0,
+        summary: "",
+        inputTokens: 0,
+        outputTokens: 0,
+        costUsd: null,
+        ...(overrides[step] ?? {}),
+      },
     ]),
   ) as Record<Step, StepCell>;
 }
@@ -126,5 +134,35 @@ describe("the step stream as a summary", () => {
     renderStream(stream({ research: { status: "done", elapsedMs: 7800 } }), null, "summary");
 
     expect(screen.getByText("7.8s")).toBeInTheDocument();
+  });
+
+  it("shows the tokens and USD cost a finished step's model calls used", () => {
+    renderStream(
+      stream({
+        draft: {
+          status: "done",
+          elapsedMs: 1200,
+          inputTokens: 1200,
+          outputTokens: 340,
+          costUsd: 0.0021,
+        },
+      }),
+      null,
+      "summary",
+    );
+
+    expect(screen.getByText("1.2k in / 340 out")).toBeInTheDocument();
+    expect(screen.getByText("$0.0021")).toBeInTheDocument();
+  });
+
+  it("shows no cost for a step whose model was not priced", () => {
+    renderStream(
+      stream({ draft: { status: "done", inputTokens: 1200, outputTokens: 340, costUsd: null } }),
+      null,
+      "summary",
+    );
+
+    expect(screen.getByText("1.2k in / 340 out")).toBeInTheDocument();
+    expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
   });
 });

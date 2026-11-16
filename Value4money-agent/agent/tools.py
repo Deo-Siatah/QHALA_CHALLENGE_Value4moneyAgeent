@@ -83,4 +83,3 @@ def submit_for_committee(run_id: str, report_md: str, approved_by: str,
                          review_json: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """File the approved report, logged under run_id."""
     return _submit_for_committee(run_id, report_md, approved_by, review_json=review_json)
-

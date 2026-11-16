@@ -11,9 +11,33 @@
 
 import asyncio
 import threading
+from types import SimpleNamespace
 
+import pytest
+
+from agent import pricing
 from api import models
 from api.events import RunEventChannel, RunEventHandler
+
+
+def llm_response(input_tokens: int = 0, output_tokens: int = 0,
+                 total_tokens: int = 0) -> SimpleNamespace:
+    """A mock of the LLMResult LangChain hands to on_llm_end, carrying usage metadata."""
+    usage = {"input_tokens": input_tokens, "output_tokens": output_tokens,
+             "total_tokens": total_tokens or input_tokens + output_tokens}
+    return SimpleNamespace(
+        generations=[[SimpleNamespace(message=SimpleNamespace(usage_metadata=usage))]],
+        llm_output=None)
+
+
+def event_of_type(handler, kind):
+    """The first event of this kind, ignoring the step.started that opened the node."""
+    while True:
+        event = asyncio.run(handler.channel.get())
+        if event is None:
+            raise AssertionError(f"no {kind} event was emitted")
+        if event.type == kind:
+            return event
 
 
 def test_an_event_emitted_from_a_worker_thread_arrives_on_the_loop():
@@ -228,3 +252,98 @@ def test_a_real_clock_never_reports_a_negative_time():
     handler.on_chain_end({}, run_id="node-1")
 
     assert handler.steps[0].elapsed_ms >= 0
+
+
+def test_a_model_call_reports_its_tokens_and_its_usd_cost(monkeypatch):
+    monkeypatch.setattr(pricing.settings, "llm_input_usd_per_mtok", 1.0)
+    monkeypatch.setattr(pricing.settings, "llm_output_usd_per_mtok", 2.0)
+    handler = RunEventHandler(RunEventChannel())
+    handler.on_chain_start({}, {}, run_id="node-1", name="draft")
+    handler.on_llm_start({}, run_id="llm-1", name="ChatGroq")
+
+    handler.on_llm_end(llm_response(1000, 500), run_id="llm-1")
+
+    event = event_of_type(handler, "model.done")
+    assert event.input_tokens == 1000
+    assert event.output_tokens == 500
+    assert event.cost_usd == pytest.approx(0.002)
+
+
+def test_cost_and_tokens_accumulate_across_every_model_call_in_one_step(monkeypatch):
+    monkeypatch.setattr(pricing.settings, "llm_input_usd_per_mtok", 1.0)
+    monkeypatch.setattr(pricing.settings, "llm_output_usd_per_mtok", 2.0)
+    handler = RunEventHandler(RunEventChannel())
+    handler.on_chain_start({}, {}, run_id="node-1", name="quality_check")
+
+    for call in range(2):
+        handler.on_llm_start({}, run_id=f"llm-{call}", name="ChatGroq")
+        handler.on_llm_end(llm_response(1000, 500), run_id=f"llm-{call}")
+
+    assert handler.step_tokens["quality_check"] == {"input_tokens": 2000,
+                                                   "output_tokens": 1000}
+    assert handler.step_costs["quality_check"] == pytest.approx(0.004)
+
+
+def test_a_model_call_without_usage_reports_no_cost_rather_than_zero(monkeypatch):
+    monkeypatch.setattr(pricing.settings, "llm_input_usd_per_mtok", 1.0)
+    monkeypatch.setattr(pricing.settings, "llm_output_usd_per_mtok", 2.0)
+    handler = RunEventHandler(RunEventChannel())
+    handler.on_chain_start({}, {}, run_id="node-1", name="draft")
+    handler.on_llm_start({}, run_id="llm-1", name="ChatGroq")
+    empty = SimpleNamespace(generations=[[SimpleNamespace(message=SimpleNamespace(usage_metadata=None))]],
+                            llm_output=None)
+
+    handler.on_llm_end(empty, run_id="llm-1")
+
+    event = event_of_type(handler, "model.done")
+    assert event.cost_usd is None
+    assert handler.step_costs == {}
+
+
+def test_an_unpriced_model_reports_tokens_but_no_usd_cost(monkeypatch):
+    monkeypatch.setattr(pricing.settings, "llm_input_usd_per_mtok", None)
+    monkeypatch.setattr(pricing.settings, "llm_output_usd_per_mtok", None)
+    handler = RunEventHandler(RunEventChannel())
+    handler.on_chain_start({}, {}, run_id="node-1", name="draft")
+    handler.on_llm_start({}, run_id="llm-1", name="ChatGroq")
+
+    handler.on_llm_end(llm_response(1000, 500), run_id="llm-1")
+
+    event = event_of_type(handler, "model.done")
+    assert event.input_tokens == 1000
+    assert event.output_tokens == 500
+    assert event.cost_usd is None
+    assert handler.step_tokens["draft"] == {"input_tokens": 1000, "output_tokens": 500}
+
+
+def test_usage_is_read_from_llm_output_when_the_message_has_none(monkeypatch):
+    monkeypatch.setattr(pricing.settings, "llm_input_usd_per_mtok", 1.0)
+    monkeypatch.setattr(pricing.settings, "llm_output_usd_per_mtok", 2.0)
+    handler = RunEventHandler(RunEventChannel())
+    handler.on_chain_start({}, {}, run_id="node-1", name="draft")
+    handler.on_llm_start({}, run_id="llm-1", name="ChatGroq")
+    response = SimpleNamespace(
+        generations=[[SimpleNamespace(message=SimpleNamespace(usage_metadata=None))]],
+        llm_output={"token_usage": {"prompt_tokens": 1000, "completion_tokens": 500}})
+
+    handler.on_llm_end(response, run_id="llm-1")
+
+    event = event_of_type(handler, "model.done")
+    assert event.input_tokens == 1000
+    assert event.output_tokens == 500
+    assert event.cost_usd == pytest.approx(0.002)
+
+
+def test_a_finished_step_carries_the_cost_of_its_model_calls(monkeypatch):
+    monkeypatch.setattr(pricing.settings, "llm_input_usd_per_mtok", 1.0)
+    monkeypatch.setattr(pricing.settings, "llm_output_usd_per_mtok", 2.0)
+    handler = RunEventHandler(RunEventChannel())
+    handler.on_chain_start({}, {}, run_id="node-1", name="draft")
+    handler.on_llm_start({}, run_id="llm-1", name="ChatGroq")
+    handler.on_llm_end(llm_response(1000, 500), run_id="llm-1")
+    handler.on_chain_end({"draft": {}}, run_id="node-1")
+
+    finished = event_of_type(handler, "step.finished")
+    assert finished.input_tokens == 1000
+    assert finished.output_tokens == 500
+    assert finished.cost_usd == pytest.approx(0.002)
